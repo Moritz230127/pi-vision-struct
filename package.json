@@ -18,7 +18,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Moritz230127/pi-vision-struct.git"
+    "url": "git+https://github.com/Moritz230127/pi-vision-struct.git"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
@@ -43,7 +43,11 @@
     "CHANGELOG.md"
   ],
   "pi": {
-    "extensions": ["./extensions"],
-    "skills": ["./skills"]
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ]
   }
 }
