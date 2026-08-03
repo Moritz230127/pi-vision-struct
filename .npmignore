@@ -1,0 +1,5 @@
+# npm 包内排除（即使 files 白名单包含这些目录）
+tests/_out/
+**/__pycache__/
+*.pyc
+*.log
