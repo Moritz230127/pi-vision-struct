@@ -1,0 +1,14 @@
+# OmniParser env 锁定依赖（python 3.12）— 版本必须钉死，见 docs/omniparser-setup.md
+# torch/torchvision 单独用 CPU 索引安装：pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+transformers==4.46.1
+huggingface_hub==0.28.1
+ultralytics>=8.3
+onnxruntime>=1.19
+rapidocr>=3.0
+supervision>=0.25
+timm>=1.0
+einops>=0.8
+opencv-python-headless>=4.10
+openai>=1.50
+azure-identity>=1.17
+open_clip_torch>=2.28

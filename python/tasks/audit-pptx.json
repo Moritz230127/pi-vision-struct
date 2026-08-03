@@ -1,0 +1,9 @@
+{
+  "name": "audit-pptx",
+  "description": "PPT 审计：结构导出 → 元素级审计（重叠/出界/对比度）",
+  "steps": [
+    {"as": "pptx", "cmd": ["vs_pptx.py", "--file", "$INPUT"]},
+    {"as": "fused", "cmd": ["vs_audit.py", "--report", "$pptx", "--canvas", "$CANVAS"]}
+  ],
+  "report": "fused"
+}

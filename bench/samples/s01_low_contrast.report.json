@@ -1,0 +1,1 @@
+{"schema": "vision-report/v2", "task": "sample", "sensors": ["sample"], "coordsys": "css_px", "source": {"type": "synthetic", "size_px": [800, 600]}, "elements": [{"bbox": [80, 60, 720, 110], "source": ["dom"], "text": "浅灰文字低对比度示例", "z": 0, "color": {"fill": "#CCCCCC", "text": "#777777"}, "fill": "#CCCCCC", "texts": [{"text": "浅灰文字低对比度示例", "color": "#777777", "size_pt": 18.0}]}]}

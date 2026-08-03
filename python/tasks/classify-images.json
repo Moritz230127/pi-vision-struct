@@ -1,0 +1,8 @@
+{
+  "name": "classify-images",
+  "description": "图片/壁纸批量分类：程序化颜色特征 + opt-in 语义标签",
+  "steps": [
+    {"as": "classify", "cmd": ["vs_wall.py", "--dir", "$INPUT", "--colors", "5", "--max-files", "$MAX"]}
+  ],
+  "report": "classify"
+}

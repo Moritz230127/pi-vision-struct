@@ -1,0 +1,85 @@
+{
+  "schema": "acceptance/v1",
+  "task": "aesthetic_judgment_2.3",
+  "generated": "deterministic-samples",
+  "metrics": {
+    "sample_count": 12,
+    "defect_count": 6,
+    "clean_count": 6,
+    "sample_agreement": 1.0,
+    "defect_recall": 1.0,
+    "clean_precision": 1.0,
+    "rule_recall": {
+      "text_contrast": 1.0,
+      "overlap": 1.0,
+      "alignment_drift": 1.0,
+      "spacing_anomaly": 1.0,
+      "safe_area": 1.0
+    },
+    "fp_clean_warn_critical": 0
+  },
+  "fp_details": [],
+  "critic": {
+    "enabled": true,
+    "checked_findings": 8,
+    "confirmed": 6,
+    "rejected": 2,
+    "critic_recall": 0.75,
+    "details": [
+      {
+        "sample": "s01_low_contrast",
+        "rule": "text_contrast",
+        "verdict": "confirmed",
+        "reason": "文本色与背景色对比度比值2.79低于WCAG AA要求的3.0"
+      },
+      {
+        "sample": "s02_overlap",
+        "rule": "overlap",
+        "verdict": "rejected",
+        "reason": "重叠面积占比低，未造成遮挡或布局冲突"
+      },
+      {
+        "sample": "s03_alignment",
+        "rule": "alignment_drift",
+        "verdict": "confirmed",
+        "reason": "偏离值7.0px超过容忍度4.0px"
+      },
+      {
+        "sample": "s03_alignment",
+        "rule": "alignment_drift",
+        "verdict": "confirmed",
+        "reason": "偏移量7.0px超出容差4.0px"
+      },
+      {
+        "sample": "s03_alignment",
+        "rule": "alignment_drift",
+        "verdict": "confirmed",
+        "reason": "偏移量7.0px超过容差4.0px"
+      },
+      {
+        "sample": "s04_spacing",
+        "rule": "spacing_anomaly",
+        "verdict": "confirmed",
+        "reason": "水平间距120px超过中位间距40px乘以阈值系数2.5（100px）"
+      },
+      {
+        "sample": "s05_offcanvas",
+        "rule": "safe_area",
+        "verdict": "rejected",
+        "reason": "图中无可见元素超出画布边界"
+      },
+      {
+        "sample": "s06_edge_text",
+        "rule": "safe_area",
+        "verdict": "confirmed",
+        "reason": "文本元素距画布边缘0px，存在裁切风险"
+      }
+    ]
+  },
+  "residual_gaps": [
+    "原生多模态基线（Gemini/GLM 免费层）需用户提供密钥后执行同套抽样集对比，当前报告该臂未运行",
+    "critic 仅复核规则已发现的 finding，不主动发现新缺陷（无开放集标注能力）",
+    "info 级 finding 不计入样本失败（对齐/间距为咨询级，避免把自然排版差异当缺陷）",
+    "抽样集为确定性合成样本；真实截图美学判断需人工标注集（待建）"
+  ]
+}

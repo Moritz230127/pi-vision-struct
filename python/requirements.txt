@@ -1,0 +1,7 @@
+# pi-vision-struct python 工具链（conda env: pi-vision, python 3.12）
+onnxruntime>=1.19
+rapidocr>=3.0
+playwright>=1.48
+python-pptx>=1.0
+numpy>=2.0
+pillow>=10.0

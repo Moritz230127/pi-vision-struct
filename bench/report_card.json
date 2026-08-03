@@ -1,0 +1,24 @@
+{
+  "color": {
+    "color_dE_max": 0.0,
+    "color_dE_mean": 0.0,
+    "color_regions_measured": 12,
+    "color_regions_gt": 12
+  },
+  "ocr": {
+    "ocr_cer_mean": 0.0,
+    "ocr_bbox_iou_mean": 0.795
+  },
+  "diff": {
+    "diff_iou_mean": 1.0,
+    "diff_recall": 1.0,
+    "diff_detected_count": 3
+  },
+  "drift": {
+    "drift_detected": true,
+    "drift_delta_e76": 76.3
+  },
+  "_meta": {
+    "elapsed_s": 2.6
+  }
+}

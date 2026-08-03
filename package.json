@@ -1,0 +1,42 @@
+{
+  "name": "pi-vision-struct",
+  "version": "0.2.0",
+  "description": "Layered lossless vision for text-only models (DeepSeek etc.): L0 source (DOM/PPTX) + L1 deterministic measurement (color/OCR/diff/WCAG with exact numbers) + L2 opt-in semantics (local qwen3-vl) + deterministic fusion (crosscheck/audit/rules) + OmniParser icon structuring + CLIP clustering. All local, read-only, schema-driven (vision-report/v2).",
+  "keywords": [
+    "pi-package",
+    "vision",
+    "ocr",
+    "screenshot",
+    "structured",
+    "dom",
+    "pptx",
+    "omniparser",
+    "clip",
+    "wcag",
+    "fusion"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "typescript": "^5"
+  },
+  "files": [
+    "extensions/",
+    "python/",
+    "skills/",
+    "docs/",
+    "bench/",
+    "tests/",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "pi": {
+    "extensions": ["./extensions"],
+    "skills": ["./skills"]
+  }
+}

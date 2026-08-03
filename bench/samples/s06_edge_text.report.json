@@ -1,0 +1,1 @@
+{"schema": "vision-report/v2", "task": "sample", "sensors": ["sample"], "coordsys": "css_px", "source": {"type": "synthetic", "size_px": [800, 600]}, "elements": [{"bbox": [100, 0, 400, 8], "source": ["dom"], "text": "贴边文本", "z": 0}]}

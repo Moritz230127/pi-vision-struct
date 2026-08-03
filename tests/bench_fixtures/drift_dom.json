@@ -1,0 +1,1 @@
+{"schema": "vision-report/v2", "coordsys": "css_px", "elements": [{"id": 0, "type": "text", "bbox": [100, 60, 260, 90], "text": "\u6807\u9898\u6d4b\u8bd5", "color": {"fill": "#FFFFFF", "text": "#111111"}, "source": ["dom"]}]}

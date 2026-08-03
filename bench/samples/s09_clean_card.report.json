@@ -1,0 +1,1 @@
+{"schema": "vision-report/v2", "task": "sample", "sensors": ["sample"], "coordsys": "css_px", "source": {"type": "synthetic", "size_px": [800, 600]}, "elements": [{"bbox": [80, 60, 720, 130], "source": ["dom"], "text": "卡片标题", "z": 1}, {"bbox": [100, 150, 700, 420], "source": ["dom"], "text": "正文内容", "z": 0}]}
