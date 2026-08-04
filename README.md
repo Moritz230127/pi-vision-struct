@@ -31,23 +31,18 @@ DL 感知    vs_omniparser (图标级, CPU) / vs_cluster (CLIP, CPU)    ← 仅�
 
 原则：**测量工具只用精确计算（PIL/像素数学）；DL 只做感知（OCR/图标/语义）；融合保持确定性（无学习式融合）**。
 
-## 工具表（15）
+## 工具（4 分组 · CLI 风格，action 枚举）
 
-| 工具 | 说明 | env |
-| --- | --- | --- |
-| `screen_capture` | grim 截屏（Wayland） | — |
-| `pix_analyze` | 主色直方图 / 区域取色 / 像素 diff（连通域定位）/ WCAG 对比度 | pi-vision |
-| `ocr_boxes` | RapidOCR PP-OCRv6，文本+精确 bbox+置信度 | pi-vision |
-| `dom_dump` | Playwright Firefox 加载 URL，DOM+computed style（DPR/滚动感知） | pi-vision |
-| `pptx_dump` | python-pptx 结构导出（形状/填充/字体/坐标 pt） | pi-vision |
-| `vs_analyze` | 配置驱动任务引擎（diagnose-screenshot / audit-pptx / classify-images） | pi-vision |
-| `vs_crosscheck` | 三方互验：颜色漂移（ΔE76 密集采样）/ OCR↔DOM / 重叠 | pi-vision |
-| `vs_audit` | 重叠/出界/对比度审计 | pi-vision |
-| `vs_rules` | 设计准则规则引擎（对比度/对齐/间距/安全区；仅设计元素） | pi-vision |
-| `vs_omniparser` | OmniParser V2 任意截图图标级元素+语义（CPU） | omniparser |
-| `vs_cluster` | CLIP 相似图聚类（确定性） | omniparser |
-| `vs_critic` | VLM-as-critic：裁剪可疑区 → qwen3-vl 复核（opt-in） | pi-vision |
-| `vs_env_check` / `wallpaper_classify` / `semantic_tag` | 环境 / 壁纸分类 / L2 语义（opt-in） | pi-vision |
+| 工具 | action | 用途 | env |
+|---|---|---|---|
+| `vs_measure` | capture / pixels / ocr / wallpaper / semantic / env | 截屏、像素测量（颜色/diff/WCAG）、OCR、壁纸分类、L2 语义、环境自检 | pi-vision |
+| `vs_struct` | dom / pptx / omniparser | DOM 结构、PPTX 结构、任意截图图标级元素 | pi-vision / omniparser |
+| `vs_fuse` | analyze / crosscheck / audit / rules / critic | 任务引擎、三方互验、布局审计、设计准则、VLM 复核 | pi-vision |
+| `vs_cluster` | — | CLIP 相似图聚类（确定性） | omniparser |
+
+> 完整命令参考在技能 `skills/vision-situation/SKILL.md`（模型按需加载，不进 AGENTS.md）。
+> 设计权衡：15 个细粒度工具 → 4 分组，每轮工具 schema 约 **3.5K → 1.3K token**（省 ~63%），
+> 且模型路由选择面变小、准确率提升；action 用 enum 校验保留参数安全。
 
 ## 验证
 

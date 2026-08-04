@@ -1,86 +1,66 @@
-# Vision Situation Awareness（视觉态势感知 · schema v2）
+# vision-situation — 视觉技能：何时用哪个命令
 
-结构化视觉引擎：让纯文本模型用**精确数字**（而非自然语言转述）理解图像。
-信息只在**测量与融合**中流动；DeepSeek 是融合层的决策者。
+> pi-vision-struct 扩展提供 4 个分组工具（`vs_measure` / `vs_struct` / `vs_fuse` / `vs_cluster`），
+> 每个工具用 `action` 枚举选择子命令。输出均为 schema v2 JSON（数字/坐标/hex，可直接推理）。
+> 全部本地、只读、无网络外发。本文件是完整命令参考——**遇到视觉任务时按此选择工具**。
 
-## 核心原则
+## 一、任务 → 工具 决策表
 
-1. **能读源码就不读渲染图**：网页问题优先 `dom_dump`（DOM 是布局真值），PPT 优先 `pptx_dump`。
-2. **测量优先于描述**：颜色取 hex、差异用像素 diff、文字用带坐标框的 OCR。
-3. **融合优先于人工对照**：优先用 `vs_crosscheck`（三方互验）和 `vs_audit`（几何审计）自动检出异常——**不要自己把两份 JSON 对照**。
-4. **不要凭截图猜数字**：所有坐标/颜色/字体来自工具 JSON，直接引用。
-5. **首选任务引擎**：`vs_analyze --task <name>` 一条命令跑完传感器+融合，新任务=新配置。
+| 任务 | 工具 |
+|---|---|
+| 截屏 / 取色 / 颜色直方图 / 双图 diff / 对比度 | `vs_measure` action=pixels（截图先 action=capture） |
+| 图片/截图里的文字 + 精确坐标 | `vs_measure` action=ocr |
+| 网页 DOM 结构（无需截图的布局真值） | `vs_struct` action=dom（需 URL） |
+| PPTX 结构（形状/字体/颜色/坐标） | `vs_struct` action=pptx |
+| 任意截图图标级元素（无 DOM 也可） | `vs_struct` action=omniparser |
+| 整页诊断管线（DOM+OCR+像素融合） | `vs_fuse` action=analyze task=diagnose-screenshot |
+| DOM↔OCR↔像素三方互验 | `vs_fuse` action=crosscheck |
+| 布局审计（重叠/出界/对比度） | `vs_fuse` action=audit（先有 report JSON） |
+| 设计准则（对齐/间距/安全区/对比度） | `vs_fuse` action=rules（report JSON 或元素报告） |
+| 对可疑 finding 做 VLM 复核 | `vs_fuse` action=critic（opt-in enable，慢） |
+| 相似图片分组（壁纸/截图聚类） | `vs_cluster` |
+| 环境自检 | `vs_measure` action=env 或 `/vs check` |
 
-## 工具
+## 二、命令参考
 
-| 场景 | 工具 |
-| --- | --- |
-| 一键任务（首选） | `vs_analyze`（tasks: diagnose-screenshot / audit-pptx / classify-images） |
-| 多源互验（DOM vs OCR vs 像素） | `vs_crosscheck`（颜色漂移 ΔE、文本缺失/多余、重叠） |
-| 几何/样式审计（任意元素） | `vs_audit`（重叠、出界、WCAG 对比度） |
-| 截图/区域 | `screen_capture` |
-| 颜色/直方图/diff/WCAG | `pix_analyze` |
-| 图上文字（带框） | `ocr_boxes` |
-| 网页 DOM+computed style | `dom_dump` |
-| PPTX 结构 | `pptx_dump` |
-| 任意截图图标级元素（无需 DOM） | `vs_omniparser` | OmniParser V2（YOLO+Florence-2，CPU）；图标语义描述 + 文本；独立 conda env，首载慢 |
-| 设计准则规则引擎 | `vs_rules` | 确定性规则：对比度/重叠/对齐漂移/间距一致/安全区；每个 finding 带证据 + suggested_cause + design_score；仅评估设计元素（dom/pptx），OCR 自然文本不误报 |
-| CLIP 相似图聚类 | `vs_cluster` | ViT-B-32 CPU 离线；余弦阈值贪心分组（确定性）；输出 clusters[] + top_pairs[] + 相似度证据 |
-| VLM-as-critic | `vs_critic` | 裁剪可疑区 → 本地 qwen3-vl 复核 → 裁决并入 findings（opt-in，--enable）；单区约 20s；全局属性缺陷（出界/安全区）裁剪视图会误判，需豁免 |
-| 验收抽样集 | `bench/run_acceptance.py` | 12 确定性样本（6 缺陷+6 干净）；规则臂 100% 一致率；critic 臂 75% 确认率（实测，分歧含规则误报识别与裁剪局限） |
-| 壁纸批量 | `wallpaper_classify` |
-| 语义标签（L2 opt-in） | `semantic_tag`（本地 qwen3-vl，仅不可测属性） |
-| 自检 | `vs_env_check` |
+### vs_measure（本地测量/感知；pi-vision env）
+- `capture`：Wayland 截屏 → `out`（PNG 路径必填）、`region`（x1,y1,x2,y2 可选）
+- `pixels`：`image` 必填；`regions`(逗号分隔 x1,y1,x2,y2)、`compare`(diff 对比图)、`colors`(主色数)、`wcag`(前景hex,背景hex 逗号分隔)、`threshold`(diff 阈值 默认30)。**返回精确数字：hex+百分比、ΔE、对比度**
+- `ocr`：`image` 必填；`region`(裁剪)、`upscale`(小字放大 默认2)、`max_items`、`min_conf`。**返回 text+4点 bbox+conf**
+- `wallpaper`：`dir` 必填；`colors`/`max_files`/`ext`/`semantic`(opt-in L2)
+- `semantic`：`image` 必填；`enable=true` 才执行（L2 有思考成本）；`prompt` 可自定义
+- `env`：环境自检（无参数）
 
-## Schema v2（统一元素模型）
+### vs_struct（L0 源码 + DL 图标；dom/pptx 用 pi-vision，omniparser 用独立 env）
+- `dom`：`url` 必填；`max_elements`(默认60)、`screenshot`(会话截图路径)。**DOM+computed style：tag/role/text/bbox/color/font/z-index**
+- `pptx`：`file` 必填；`max_shapes`、`slide`。**pt 坐标、填充 hex、字号/色**
+- `omniparser`：`image` 必填；`max_items`、`no_ocr`。**图标级元素 + Florence-2 语义描述；CPU 首载 10-20s，单图 30-60s**
 
-```jsonc
-{"schema": "vision-report/v2", "task": "...", "sensors": ["pix","ocr","dom"],
- "coordsys": "css_px | device_px | image_px | pt",
- "source": {"dpr": 1.0, "viewport_px": [...], "scroll": [...]},
- "elements": [{"id":0, "type":"text|button|panel|region|div...", "bbox":[x1,y1,x2,y2],
-               "text":"...", "conf":0.99, "color":{"fill":"#FFF","text":"#111"},
-               "font":{...}, "z":5, "source":["dom"], "coordsys":"css_px"}],
- "anomalies": [{"type":"color_drift|text_missing_in_ocr|text_not_in_dom|element_overlap|off_canvas|contrast_fail",
-                "bbox":[...], "confidence":0.9,
-                "evidence": {"dom_color":"#111111","pixel_color":"#8A898A","delta_e76":42.3},
-                "suggested_cause":"..."}],
- "metrics": {"dominant_colors":[...], "brightness":230, "anomaly_count":2},
- "truncated": false}
+### vs_fuse（确定性融合/准则；pi-vision env）
+- `analyze`：`task` 必填（diagnose-screenshot/audit-pptx/classify-images）；`input`/`url`/`dpr` 可选。**多步传感器+融合合并报告**
+- `crosscheck`：`image` 必填；`dom`/`ocr`(报告 JSON 路径)、`dpr`、`color_threshold`(ΔE 默认5)。**颜色漂移/文本互验/重叠**
+- `audit`：`report` 必填（pptx/dom 报告）；`canvas`(WxH)、`overlap_threshold`
+- `rules`：`report` 必填；`canvas`、`align_tol`(默认4px)、`margin`(默认2px)。**R1 对比度/R2 重叠/R3 对齐漂移/R4 间距/R5 安全区；仅评估设计元素，OCR 自然文本不误报；每个 finding 带证据+阈值**
+- `critic`：`report`+`image` 必填；`enable=true` 才调 VLM；`max_critic`(默认8)、`margin`。**裁剪可疑区 → 本地 qwen3-vl 裁决 → 证据并入 finding。注意：出界/安全区等全局属性缺陷在裁剪视图会误拒，需豁免或结合 rules 证据解读**
+
+### vs_cluster（CLIP 离线聚类；omniparser env）
+- `dir` 或 `files`(逗号分隔)；`threshold`(默认0.75 越大越细)、`max_files`。**输出 clusters[]（代表+成员相似度）+ top_pairs[]；确定性**
+
+## 三、输出解读要点
+
+- 坐标系：schema v2 `coordsys` 字段（css_px/device_px/image_px/pt）；跨工具比较先换算
+- 颜色：hex + 百分比 + CIELAB ΔE（漂移判定用 ΔE76，阈值默认 5）
+- 对比度：WCAG gamma 校正公式，AA 要求 4.5:1（大字号 3:1）
+- findings/anomalies 一律带 `evidence`（数值+阈值）与 `suggested_cause`——推理时引用具体数值而非泛泛而谈
+- 模型自身不能看图：**永远先调工具取结构化数据，再基于数字推理**
+
+## 四、示例调用（JSON 参数形态）
+
+```json
+{"action": "capture", "out": "/tmp/vs_cap.png"}
+{"action": "ocr", "image": "/tmp/vs_cap.png", "upscale": 2}
+{"action": "pixels", "image": "/tmp/vs_cap.png", "colors": 8}
+{"action": "analyze", "task": "diagnose-screenshot", "input": "/tmp/vs_cap.png"}
+{"action": "rules", "report": "/tmp/report.json", "canvas": "1920x1067"}
+{"action": "critic", "report": "/tmp/report.json", "image": "/tmp/vs_cap.png", "enable": true, "max_critic": 4}
 ```
-
-- `bbox` 一律 `[x1,y1,x2,y2]`；DOM 是 `css_px`（含 `bbox_device_px`=×DPR），OCR/截图是 `image_px`，PPT 是 `pt`
-- **anomalies 带证据链**：优先直接引用 evidence 数值，不要重新估算
-- ΔE76 色差阈值参考：<1 不可感知，2-10 可感知，>10 明显，>50 巨大
-
-## 典型工作流
-
-### Firefox 显示异常诊断（融合闭环）
-
-1. `screen_capture` 抓当前屏幕 → 得 PNG
-2. `vs_analyze --task diagnose-screenshot --input <PNG> --url <页面URL>`：pix + ocr + dom + crosscheck 一条命令
-   （无 URL 时自动跳过 DOM 步骤）
-3. **读 `anomalies` 的证据**：`color_drift`（DOM 声明色 vs 像素实测 ΔE）、`text_missing_in_ocr`（渲染失败）
-4. 依据证据定位并修复 → 修复后复截图 → `pix_analyze --compare` 验证 diff 归零
-
-### PPT 优化
-
-1. `vs_analyze --task audit-pptx --input <file.pptx>`：pptx_dump + vs_audit（重叠/出界/对比度自动检出）
-2. 引用 evidence 中的 bbox/面积/ratio（"卡片B 与卡片A 重叠 72×72pt，对比度 3.95 < 4.5"）
-
-### 壁纸/图片分类
-
-1. `vs_analyze --task classify-images --input <目录>`（程序化：色相族/冷暖/亮度/饱和度/宽高比 + 分组）
-2. 风格/主题等主观标签：`semantic_tag`（opt-in：`enable: true`；qwen3-vl 思考型，单张 1-2 分钟）
-
-## L2 语义（opt-in）
-
-- 只处理**不可测量**属性（风格/主题/类型）；颜色/坐标/尺寸一律走 L0/L1
-- 默认关闭：不传 `enable` 时返回 `enabled:false`；只连 localhost:11434，无外发
-
-## 注意
-
-- 所有工具**只读**、本地、输出上限；`truncated=true` 时缩小范围重查
-- 坐标系：截图/OCR=像素，PPT=pt（72pt=1in），DOM=css_px（乘 DPR 得设备像素）
-- 工具失败返回 `{"error": ...}`，先读 error 再重试
-- 实景截图存在每屏噪声（显示器亮度差异、亚像素、焦点态），跨截图 diff 需先亮度对齐；严格 diff 归零在受控渲染下断言
