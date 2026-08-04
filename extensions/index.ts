@@ -359,7 +359,7 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 		name: "vs_measure",
 		label: "Vision Measure (capture/pixels/ocr/wallpaper/semantic/env)",
 		description:
-			"确定性测量与感知传感器（本地，无网络）。action 枚举：capture=Wayland 截屏(region 可选)；pixels=主色直方图/区域取色/双图 diff 异常定位/WCAG 对比度(传 image, 可选 regions/compare/colors/wcag/threshold)；ocr=RapidOCR 文本+精确 bbox(传 image, 可选 region/upscale/max_items/min_conf)；wallpaper=壁纸批量程序化分类(传 dir, 可选 colors/max_files/ext/semantic)；semantic=本地 qwen3-vl L2 语义标签(传 image, opt-in enable)；env=conda 环境自检。输出 schema v2 JSON。完整命令参考见技能 vision-situation。",
+			"像素级测量与感知传感器（本地，无网络）。用于一切需要从图片取数值/坐标/文字的任务——模型不能直接看图，任何视觉推理必须先经此工具获取结构化数据。actions: capture=Wayland 截屏(必填 out)；pixels=主色直方图/区域取色/diff 异常定位/WCAG 对比度(必填 image)；ocr=文字+精确 4 点 bbox(必填 image，小字加 upscale)；wallpaper=壁纸批量程序化分类(必填 dir)；semantic=L2 语义标签(opt-in enable)；env=环境自检。区分：整页多传感器融合用 vs_fuse analyze；图标级 UI 元素用 vs_struct omniparser；本工具是单图测量/文字/颜色。",
 		parameters: Type.Object({
 			action: Type.Union([
 				Type.Literal("capture"),
@@ -396,7 +396,7 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "vs_struct",label: "Structure (dom/pptx/omniparser)",
 		description:
-			"L0 源码结构化 + DL 图标感知。action 枚举：dom=Playwright Firefox 加载 URL 导出 DOM+computed style(传 url, 可选 max_elements/screenshot)；pptx=python-pptx 导出形状/填充/字体/坐标 pt(传 file, 可选 max_shapes/slide)；omniparser=OmniParser V2 任意截图图标级元素+语义描述(传 image, 可选 max_items/no_ocr；CPU 首载 10-20s)。输出 schema v2 JSON。完整命令参考见技能 vision-situation。",
+			"L0 源码结构化 + DL 图标感知。actions: dom=网页布局无损真值(必填 url，DOM+computed style 比截图更准)；pptx=PPTX 结构(必填 file，pt 坐标/填充 hex/字体)；omniparser=任意截图图标级 UI 元素+语义描述(必填 image，无 DOM 时的替代；CPU 首载 10-20s，单图 30-60s)。区分：只要文字/颜色用 vs_measure；本工具提供元素结构与源码层证据，输出可传给 vs_fuse 做审计/规则。",
 		parameters: Type.Object({
 			action: Type.Union([
 				Type.Literal("dom"),
@@ -421,7 +421,7 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "vs_fuse",label: "Fusion & Rules (analyze/crosscheck/audit/rules/critic)",
 		description:
-			"确定性融合/审计/准则/复核（本地）。action 枚举：analyze=配置驱动任务引擎(传 task，可选 input/url/dpr；内置 diagnose-screenshot/audit-pptx/classify-images)；crosscheck=DOM↔OCR↔像素三方互验(传 image，可选 dom/ocr 报告 JSON/dpr/color_threshold)；audit=重叠/出界/对比度审计(传 report JSON，可选 canvas/overlap_threshold)；rules=设计准则规则引擎(传 report JSON，可选 canvas/align_tol/margin)；critic=VLM 复核裁剪区(传 report+image，opt-in enable，可选 max_critic/margin；全局属性缺陷出界/安全区在裁剪视图会误判)。输出 schema v2。完整命令参考见技能 vision-situation。",
+			"确定性融合/审计/准则/复核（本地）。把多个测量/结构报告合并判定，或对已有报告做规则审计。actions: analyze=配置驱动整页管线(必填 task；diagnose-screenshot 是整页分析首选)；crosscheck=DOM↔OCR↔像素三方互验(必填 image，可选 dom/ocr 报告)；audit=重叠/出界/对比度审计(必填 report)；rules=设计准则引擎(必填 report；R1对比度/R2重叠/R3对齐/R4间距/R5安全区，仅评估设计元素)；critic=VLM 复核裁剪区(必填 report+image，opt-in enable；出界/安全区等全局属性缺陷在裁剪视图会误判)。注意：audit/rules/critic 需先把前置工具输出存为报告 JSON 文件再传入。",
 		parameters: Type.Object({
 			action: Type.Union([
 				Type.Literal("analyze"),
@@ -454,7 +454,7 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "vs_cluster",label: "CLIP Similarity Clustering",
 		description:
-			"CLIP (ViT-B-32, CPU, offline) 相似图聚类：感知相似度矩阵 + 阈值贪心分组（确定性，同输入同输出）。传 dir 或 files(逗号分隔)，可选 threshold(默认 0.75，越大分组越细)/max_files(默认 200)。输出 clusters[]（代表图+成员相似度）+ top_pairs[]。首次运行下载模型 ~350MB（需代理，之后离线）。运行于 omniparser env。",
+			"CLIP (ViT-B-32, CPU, offline) 相似图聚类：感知相似度矩阵 + 阈值贪心分组（确定性，同输入同输出）。传 dir 或 files(逗号分隔)，可选 threshold(默认 0.75，越大分组越细)/max_files(默认 200)。输出 clusters[]（代表图+成员相似度）+ top_pairs[]。首次运行下载模型 ~350MB（需代理，之后离线）。运行于 omniparser env。用于图片集合的相似分组（壁纸/截图/照片），单张分析不要用它。",
 		parameters: Type.Object({
 			dir: Type.Optional(Type.String({ description: "图片目录" })),
 			files: Type.Optional(Type.String({ description: "逗号分隔文件列表（与 dir 二选一）" })),
