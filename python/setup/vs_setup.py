@@ -119,9 +119,32 @@ def main() -> int:
     env = base_env(envs)
 
     if args.check:
-        # ---- 只读健康检查 ----
+        # ---- 只读深度健康检查（env + 模型 + 沙箱 + Ollama + daemon）----
         core_ok = all(check_env(py, m) for m in ("PIL", "numpy", "onnxruntime", "rapidocr", "pptx"))
         omni_ok = all(check_env(omni_py, m) for m in ("torch", "transformers", "ultralytics"))
+
+        def exists(p: Path) -> bool:
+            return p.exists()
+
+        omni_home = Path.home() / ".cache" / "omniparser"
+        models = {
+            "omniparser_weights": exists(omni_home / "weights" / "icon_detect_v3" / "model.pt")
+            and exists(omni_home / "weights" / "icon_caption_florence"),
+            "florence_hf_cache": exists(Path.home() / ".cache" / "huggingface" / "hub"
+                                         / "models--microsoft--Florence-2-base"),
+            "clip_hf_cache": exists(Path.home() / ".cache" / "huggingface" / "hub"
+                                     / "models--laion--CLIP-ViT-B-32-laion2B-s34B-b79K"),
+        }
+        daemon_sock = exists(omni_home / "omniserver.sock")
+        bwrap_ok = shutil.which("bwrap") is not None
+        ollama_ok = False
+        try:
+            import urllib.request
+
+            with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=2) as r:
+                ollama_ok = "qwen3-vl:8b" in r.read().decode("utf-8", "ignore")
+        except Exception:
+            ollama_ok = False
         report = {
             "ok": True, "mode": "check",
             "conda": conda, "envs_dir": str(envs),
@@ -129,8 +152,12 @@ def main() -> int:
                 "pi-vision": {"exists": py.exists(), "complete": core_ok},
                 "omniparser": {"exists": omni_py.exists(), "complete": omni_ok},
             },
+            "models": models,
+            "sandbox": {"bwrap": bwrap_ok},
+            "ollama": {"qwen3_vl": ollama_ok},
+            "daemon": {"socket": daemon_sock},
             "steps": [{"name": "health_check", "status": "ok",
-                       "detail": f"core={'完整' if core_ok else '缺失'} omni={'完整' if omni_ok else '缺失'}"}],
+                        "detail": f"core={'完整' if core_ok else '缺失'} omni={'完整' if omni_ok else '缺失'}"}],
         }
         print(json.dumps(report, ensure_ascii=False))
         return 0
