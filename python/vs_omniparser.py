@@ -26,33 +26,45 @@ os.environ["HF_MODULES_CACHE"] = f"{Path.home()}/.cache/omniparser/transformers_
 
 OMNI_DIR = f"{Path.home()}/.cache/omniparser"
 WEIGHTS = f"{OMNI_DIR}/weights"
-DAEMON_PORT = 8765
-DAEMON_URL = f"http://127.0.0.1:{DAEMON_PORT}"
+DAEMON_SOCKET = f"{OMNI_DIR}/omniserver.sock"
+
+
+def _unix_http(method: str, path: str, body: bytes | None = None,
+               timeout: float = 3.0) -> dict:
+    """经 unix socket 的 HTTP 客户端（文件系统 IPC，无任何 TCP）。"""
+    import http.client
+    import socket
+
+    class _UnixConn(http.client.HTTPConnection):
+        def connect(self):
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.sock.settimeout(timeout)
+            self.sock.connect(DAEMON_SOCKET)
+
+    conn = _UnixConn("unix")
+    try:
+        conn.request(method, path, body=body,
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        return json.loads(resp.read() or b"{}")
+    finally:
+        conn.close()
 
 
 def daemon_health(timeout: float = 3.0) -> bool:
-    import urllib.request
-
     try:
-        with urllib.request.urlopen(f"{DAEMON_URL}/health", timeout=timeout) as r:
-            d = json.loads(r.read())
-            return bool(d.get("ok"))
+        d = _unix_http("GET", "/health", timeout=timeout)
+        return bool(d.get("ok"))
     except Exception:
         return False
 
 
 def daemon_parse(image_path: str, max_items: int, no_ocr: bool) -> dict | None:
     """调用常驻服务；失败返回 None（调用方回退直连）。"""
-    import urllib.request
-
     try:
         body = json.dumps({"image": image_path, "max_items": max_items,
                            "no_ocr": no_ocr}).encode("utf-8")
-        req = urllib.request.Request(f"{DAEMON_URL}/parse", data=body,
-                                     headers={"Content-Type": "application/json"},
-                                     method="POST")
-        with urllib.request.urlopen(req, timeout=1800) as r:
-            return json.loads(r.read())
+        return _unix_http("POST", "/parse", body=body, timeout=1800)
     except Exception:
         return None
 
@@ -66,7 +78,7 @@ def daemon_spawn() -> bool:
     cmd = [
         sys.executable, "-u",
         f"{Path(__file__).resolve().parent}/omniserver.py",
-        "--port", str(DAEMON_PORT),
+        "--socket", DAEMON_SOCKET,
     ]
     try:
         subprocess.Popen(cmd, stdout=log, stderr=log, stdin=subprocess.DEVNULL,

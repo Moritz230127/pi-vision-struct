@@ -28,16 +28,23 @@ const DEFAULT_PYTHON = "/home/Arch/conda-envs/pi-vision/bin/python";
 const OMNI_PYTHON = "/home/Arch/conda-envs/omniparser/bin/python";
 const PKG_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PY = (name: string) => `${PKG_ROOT}python/${name}`;
+const BWRAP = PY("setup/vs_bwrap.sh"); // 严格本地化沙箱（零网络 + 只读根）
 
 function runPython(
 	pythonBin: string,
 	args: string[],
 	timeoutMs: number,
+	sandbox = true,
 ): Promise<string> {
 	return new Promise((resolve) => {
+		// 沙箱: bwrap 内核隔离（--unshare-net 零网络、--ro-bind / 只读根）。
+		// 豁免（sandbox=false）: dom（本职加载用户 URL）/ critic / semantic
+		// （依赖宿主 Ollama 的 127.0.0.1，硬编码无用户可控目标，已审计）。
+		const cmd = sandbox ? BWRAP : pythonBin;
+		const cmdArgs = sandbox ? [pythonBin, ...args] : args;
 		execFile(
-			pythonBin,
-			args,
+			cmd,
+			cmdArgs,
 			{ timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 },
 			(err, stdout, stderr) => {
 				if (err) {
@@ -62,6 +69,7 @@ interface Act {
 	timeout: number;
 	build: (p: Record<string, string>) => string[]; // 参数 → CLI 参数
 	inline?: string; // 内联 python 脚本
+	sandbox?: boolean; // 默认 true（bwrap 隔离）; false = 豁免（见上）
 }
 
 function num(p: Record<string, string>, k: string): string[] {
@@ -132,6 +140,7 @@ const MEASURE: Record<string, Act> = {
 	},
 	semantic: {
 		script: "vs_semantic.py",
+		sandbox: false, // 依赖宿主 Ollama 127.0.0.1（硬编码目标）
 		timeout: 360000,
 		build: (p) => [
 			...flag(p, "image", "--image"),
@@ -159,6 +168,7 @@ const MEASURE: Record<string, Act> = {
 const STRUCT: Record<string, Act> = {
 	dom: {
 		script: "vs_dom.py",
+		sandbox: false, // 本职加载用户指定 URL，需要网络
 		timeout: 60000,
 		build: (p) => [
 			...flag(p, "url", "--url"),
@@ -239,6 +249,7 @@ const FUSE: Record<string, Act> = {
 	},
 	critic: {
 		script: "vs_critic.py",
+		sandbox: false, // 依赖宿主 Ollama 127.0.0.1（硬编码目标）
 		timeout: 900000,
 		build: (p) => [
 			...flag(p, "report", "--report"),
@@ -277,11 +288,13 @@ async function dispatch(
 		Object.entries(params).map(([k, v]) => [k, String(v)]),
 	);
 	const out = act.inline
-		? await runPython(act.bin ?? DEFAULT_PYTHON, ["-c", act.inline], act.timeout)
+		? await runPython(act.bin ?? DEFAULT_PYTHON, ["-c", act.inline], act.timeout,
+						   act.sandbox ?? true)
 		: await runPython(
 				act.bin ?? DEFAULT_PYTHON,
 				[PY(act.script ?? ""), ...act.build(p)],
 				act.timeout,
+				act.sandbox ?? true,
 			);
 	return { content: [{ type: "text", text: out }], details: {} };
 }

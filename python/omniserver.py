@@ -4,33 +4,34 @@
 vs_omniparser 每次调用都冷载 YOLO + Florence-2（~10s）。本服务把模型驻留内存，
 调用降为纯推理。仅绑定 127.0.0.1，无任何外发。
 
-API:
-  GET  /health         → {"ok": true, "pid": N, "models": ["yolo","florence2"]}
+API（unix socket，文件系统 IPC——无 TCP 端口，与沙箱兼容）:
+  GET  /health         → {"ok": true, "pid": N, "models": [...]}
   POST /parse          → body JSON: {image, max_items?, no_ocr?}
                          → schema v2 elements（与 vs_omniparser 输出一致）
   POST /shutdown       → 优雅退出
 
-启动:
-  nohup /home/Arch/conda-envs/omniparser/bin/python -u python/omniserver.py \
-        > ~/.cache/omniparser/daemon.log 2>&1 &
+socket: ~/.cache/omniparser/omniserver.sock
 
-停止: pkill -f omniserver.py
+启动（沙箱内亦可，无网络仅文件系统 IPC）:
+  setsid -f <omniparser-python> -u python/omniserver.py \
+        >> ~/.cache/omniparser/daemon.log 2>&1
+
+停止: pkill -f 'omniserve[r].py'
 """
 import argparse
-import base64
-import io
 import json
 import os
+import socketserver
 import sys
 import types
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 OMNI_DIR = f"{os.path.expanduser('~')}/.cache/omniparser"
 os.environ["HF_MODULES_CACHE"] = f"{OMNI_DIR}/transformers_modules"
 
-PORT = 8765
+SOCKET_PATH = f"{OMNI_DIR}/omniserver.sock"
 MODELS: dict = {}
 
 
@@ -165,13 +166,22 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
 
+class ThreadingUnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    daemon_threads = True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", type=int, default=PORT)
+    ap.add_argument("--socket", default=SOCKET_PATH)
     args = ap.parse_args()
+    sock = os.path.expanduser(args.socket)
+    try:
+        os.unlink(sock)
+    except FileNotFoundError:
+        pass
     load_models()  # 启动即加载，首次调用不再等待
-    srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(json.dumps({"ok": True, "pid": os.getpid(), "port": args.port,
+    srv = ThreadingUnixServer(sock, Handler)
+    print(json.dumps({"ok": True, "pid": os.getpid(), "socket": sock,
                        "models": sorted(MODELS.keys())}), flush=True)
     srv.serve_forever()
     return 0

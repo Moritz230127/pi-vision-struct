@@ -1,6 +1,7 @@
 # vision-situation — 视觉技能：何时用哪个命令
 
 > pi-vision-struct 扩展提供 4 个分组工具（`vs_measure` / `vs_struct` / `vs_fuse` / `vs_cluster`），
+> **严格本地化**：除 dom/critic/semantic 外全部工具在内核沙箱（bwrap --unshare-net：零网络+只读根）内运行；
 > 每个工具用 `action` 枚举选择子命令。输出均为 schema v2 JSON（数字/坐标/hex，可直接推理）。
 > 全部本地、只读、无网络外发。本文件是完整命令参考——**遇到视觉任务时按此选择工具**。
 

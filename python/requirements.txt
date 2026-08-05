@@ -1,7 +1,11 @@
 # pi-vision-struct python 工具链（conda env: pi-vision, python 3.12）
-onnxruntime>=1.19
-rapidocr>=3.0
-playwright>=1.48
-python-pptx>=1.0
-numpy>=2.0
-pillow>=10.0
+# 版本精确钉死（2026-08-05 pip freeze 冻结）：防止环境漂移破坏工具；升级需整套回归
+onnxruntime==1.28.0
+rapidocr==3.9.2
+playwright==1.62.0
+python-pptx==1.0.2
+numpy==2.3.5
+pillow==12.3.0
+paddlepaddle==3.3.1
+paddleocr==3.7.0
+paddlex==3.7.2

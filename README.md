@@ -67,6 +67,14 @@ DL 感知    vs_omniparser (图标级, CPU) / vs_cluster (CLIP, CPU)    ← 仅�
 - `omniparser` env（python 3.12，CPU torch）：OmniParser + CLIP —— `python/requirements-omniparser.txt`；版本钉死与模型/补丁详见 **docs/omniparser-setup.md**
 - env 目录：`$HOME/conda-envs`（`PI_VISION_PYTHON` 可覆盖 python 路径）；下载需代理时：`/vs setup --proxy http://127.0.0.1:10808`
 
+## 安全与本地化（严格封装）
+
+- **运行时零网络外发**（审计确认）；另加**内核级强制**：工具经 bwrap `--unshare-net` 沙箱运行（无任何网络，连回环都没有）+ 根文件系统只读
+- 豁免 3 项并注明原因：`dom`（本职加载用户 URL）、`critic`/`semantic`（依赖宿主 Ollama 127.0.0.1，硬编码目标、无用户可控网络输入，已审计）
+- OmniParser 常驻服务走 **unix socket**（文件系统 IPC，无 TCP 端口），沙箱内外均可达
+- 依赖版本精确钉死（`requirements*.txt` == 冻结），`pip check` 零冲突；无 bwrap 时优雅退化
+- 可用 `VS_NO_SANDBOX=1` 关闭沙箱（不推荐）
+
 ## 已知限制（残余差距）
 
 - 原生多模态基线对比需免费 Gemini/GLM 密钥（用户侧）
