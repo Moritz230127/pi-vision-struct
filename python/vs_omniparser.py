@@ -9,7 +9,8 @@ CPU 运行（torch CPU 版，不占 8GB 显存）；首载模型约 10-20s。
   vs_omniparser.py --image PATH [--box-threshold 0.05] [--max-items 60] [--no-ocr]
 
 依赖环境: conda env `omniparser`（torch-cpu + ultralytics + transformers + rapidocr）
-模型: /tmp/OmniParser/weights/icon_detect_v3/model.pt + weights/icon_caption_florence/
+模型: ~/.cache/omniparser/weights/icon_detect_v3/model.pt + weights/icon_caption_florence/
+（持久目录，重启不丢；重建脚本: python/setup/repair_omniparser.sh）
 """
 import argparse
 import json
@@ -21,9 +22,9 @@ from typing import Any
 # 模型已预下载到 HF 缓存（Florence-2-base + 微调权重），强制离线加载
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
-os.environ["HF_MODULES_CACHE"] = "/tmp/OmniParser/transformers_modules"  # trust_remote_code 模块缓存固定路径
+os.environ["HF_MODULES_CACHE"] = f"{Path.home()}/.cache/omniparser/transformers_modules"  # trust_remote_code 模块缓存固定路径
 
-OMNI_DIR = "/tmp/OmniParser"
+OMNI_DIR = f"{Path.home()}/.cache/omniparser"
 WEIGHTS = f"{OMNI_DIR}/weights"
 
 

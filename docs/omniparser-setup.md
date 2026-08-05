@@ -11,7 +11,7 @@
 - **版本钉死原因**：transformers 5.x 的 Florence2 配置结构变了（`Florence2LanguageConfig` KeyError）；4.56 无语言配置类；**4.46.1 与检查点（transformers_version=4.46.1）精确匹配**，走远程代码路径
 - 下载走代理：`export HTTPS_PROXY=http://127.0.0.1:10808 HTTP_PROXY=http://127.0.0.1:10808`
 
-## 模型（/tmp/OmniParser/weights/）
+## 模型（~/.cache/omniparser/weights/）
 
 | 模型 | 路径 | 来源 |
 | --- | --- | --- |
@@ -23,10 +23,10 @@
 
 1. **transformers 版本**：必须 4.46.1（检查点匹配）；hub 0.28.1（0.36 的 local_files_only 校验过严）
 2. **HF 缓存 refs/main 不能有尾随换行**：`printf '<hash>' > .../refs/main`（echo 会加 \n 导致离线解析失败）
-3. **检查点 config.json 两处补丁**（/tmp/OmniParser/weights/icon_caption_florence/config.json）：
+3. **检查点 config.json 两处补丁**（~/.cache/omniparser/weights/icon_caption_florence/config.json）：
    - `_name_or_path`: `microsoft/Florence-2-base-ft` → `microsoft/Florence-2-base`（已缓存的仓库）
    - `auto_map` 前缀：`microsoft/Florence-2-base-ft--...` → `microsoft/Florence-2-base--...`
-4. **离线加载**：vs_omniparser.py 顶部设 `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` / `HF_MODULES_CACHE=/tmp/OmniParser/transformers_modules`
+4. **离线加载**：vs_omniparser.py 顶部设 `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` / `HF_MODULES_CACHE=~/.cache/omniparser/transformers_modules`
 5. **easyocr/paddleocr 桩**：util/utils.py 顶层实例化它们，脚本用模块桩跳过（文本由 RapidOCR 提供）
 6. **stdout 纯净**：库的进度打印用 `contextlib.redirect_stdout(sys.stderr)` 隔离，stdout 只输出 JSON
 
@@ -42,7 +42,7 @@ mamba create -n omniparser python=3.12 -y
 
 ## 重启后一键修复（推荐）
 
-/tmp 重启即清空（权重 1.3GB 丢失），一键重建：
+权重现位于持久目录 ~/.cache/omniparser（重启不丢，不再需要常规修复）。仅当目录缺失时重建：
 
 ```bash
 ~/.pi-extensions/pi-vision-struct/python/setup/repair_omniparser.sh

@@ -182,7 +182,7 @@ def main() -> int:
         if not args.dry_run:
             steps.append(step_result(
                 "omniparser 模型与补丁", False,
-                "需手动：下载模型到 /tmp/OmniParser/weights + config 补丁，见 docs/omniparser-setup.md"))
+                "需手动：运行 python/setup/repair_omniparser.sh 下载权重（~/.cache/omniparser），见 docs/omniparser-setup.md"))
 
     ok = all(s["status"] == "ok" for s in steps)
     print(json.dumps({
