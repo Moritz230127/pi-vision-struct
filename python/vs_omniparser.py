@@ -26,6 +26,59 @@ os.environ["HF_MODULES_CACHE"] = f"{Path.home()}/.cache/omniparser/transformers_
 
 OMNI_DIR = f"{Path.home()}/.cache/omniparser"
 WEIGHTS = f"{OMNI_DIR}/weights"
+DAEMON_PORT = 8765
+DAEMON_URL = f"http://127.0.0.1:{DAEMON_PORT}"
+
+
+def daemon_health(timeout: float = 3.0) -> bool:
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{DAEMON_URL}/health", timeout=timeout) as r:
+            d = json.loads(r.read())
+            return bool(d.get("ok"))
+    except Exception:
+        return False
+
+
+def daemon_parse(image_path: str, max_items: int, no_ocr: bool) -> dict | None:
+    """调用常驻服务；失败返回 None（调用方回退直连）。"""
+    import urllib.request
+
+    try:
+        body = json.dumps({"image": image_path, "max_items": max_items,
+                           "no_ocr": no_ocr}).encode("utf-8")
+        req = urllib.request.Request(f"{DAEMON_URL}/parse", data=body,
+                                     headers={"Content-Type": "application/json"},
+                                     method="POST")
+        with urllib.request.urlopen(req, timeout=1800) as r:
+            return json.loads(r.read())
+    except Exception:
+        return None
+
+
+def daemon_spawn() -> bool:
+    """拉起常驻服务（detached）。等待就绪最多 90s（含模型加载）。"""
+    import subprocess
+    import time
+
+    log = open(f"{OMNI_DIR}/daemon.log", "a", encoding="utf-8")
+    cmd = [
+        sys.executable, "-u",
+        f"{Path(__file__).resolve().parent}/omniserver.py",
+        "--port", str(DAEMON_PORT),
+    ]
+    try:
+        subprocess.Popen(cmd, stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                         start_new_session=True, close_fds=True)
+    except Exception:
+        return False
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        if daemon_health(timeout=1.0):
+            return True
+        time.sleep(1)
+    return False
 
 
 def main() -> int:
@@ -34,7 +87,23 @@ def main() -> int:
     ap.add_argument("--box-threshold", type=float, default=0.05)
     ap.add_argument("--max-items", type=int, default=60)
     ap.add_argument("--no-ocr", action="store_true", help="跳过 OCR（仅图标）")
+    ap.add_argument("--daemon", choices=["auto", "always", "never"], default="auto",
+                    help="auto=有服务则用否则拉起；always=必须服务；never=直连")
     args = ap.parse_args()
+
+    # 常驻服务优先（模型驻留，去掉 ~10s 冷载）
+    if args.daemon != "never" and os.environ.get("VS_OMNI_DAEMON") != "0":
+        if daemon_health() or daemon_spawn():
+            out = daemon_parse(args.image, args.max_items, args.no_ocr)
+            if out is not None:
+                print(json.dumps(out, ensure_ascii=False))
+                return 0
+            if args.daemon == "always":
+                print(json.dumps({"error": "vs_omniparser failed",
+                                  "detail": "常驻服务不可用(--daemon=always)"},
+                                 ensure_ascii=False))
+                return 1
+        # 服务失败 → 回退直连
 
     try:
         sys.path.insert(0, OMNI_DIR)

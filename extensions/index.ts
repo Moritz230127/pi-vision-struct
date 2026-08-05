@@ -115,6 +115,7 @@ const MEASURE: Record<string, Act> = {
 			...flag(p, "max_items", "--max-items"),
 			...flag(p, "min_conf", "--min-conf"),
 			...flag(p, "backend", "--backend"),
+			...flag(p, "preprocess", "--preprocess"),
 		],
 	},
 	wallpaper: {
@@ -398,6 +399,12 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 				Type.String({
 					description:
 						"OCR 后端：rapidocr（默认，快 ~2-5s，召回中）/ paddle（PP-OCRv6 medium，高召回但慢 ~7-40s）",
+				}),
+			),
+			preprocess: Type.Optional(
+				Type.String({
+					description:
+						"预处理：none（默认）/ contrast（自动对比度拉伸，低对比度文字用）",
 				}),
 			),
 			enable: Type.Optional(Type.Boolean({ description: "opt-in 开启 L2 语义（semantic）" })),

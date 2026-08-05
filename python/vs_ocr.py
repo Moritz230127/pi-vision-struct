@@ -59,6 +59,8 @@ def main() -> int:
     ap.add_argument("--max-items", type=int, default=100)
     ap.add_argument("--min-conf", type=float, default=0.5)
     ap.add_argument("--backend", default="rapidocr", choices=["rapidocr", "paddle"])
+    ap.add_argument("--preprocess", default="none", choices=["none", "contrast"],
+                    help="none=原图; contrast=自动对比度拉伸（低对比度文字用）")
     args = ap.parse_args()
 
     try:
@@ -71,6 +73,10 @@ def main() -> int:
             ox, oy = min(x1, x2), min(y1, y2)
             crop = (ox, oy, max(x1, x2), max(y1, y2))
             im = im.crop(crop)
+        if args.preprocess == "contrast":
+            from PIL import ImageOps  # type: ignore[import-not-found]
+
+            im = ImageOps.autocontrast(im, cutoff=1)
         if args.upscale and args.upscale > 1:
             im = im.resize((im.width * args.upscale, im.height * args.upscale), Image.LANCZOS)  # type: ignore[attr-defined]
 
