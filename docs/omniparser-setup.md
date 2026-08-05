@@ -39,3 +39,16 @@ mamba create -n omniparser python=3.12 -y
 /home/Arch/conda-envs/omniparser/bin/python -m pip install "transformers==4.46.1" "huggingface_hub==0.28.1" ultralytics onnxruntime rapidocr supervision timm einops opencv-python-headless openai azure-identity
 # 模型 + 补丁见上文；Florence-2-base 用 snapshot_download 缓存
 ```
+
+## 重启后一键修复（推荐）
+
+/tmp 重启即清空（权重 1.3GB 丢失），一键重建：
+
+```bash
+~/.pi-extensions/pi-vision-struct/python/setup/repair_omniparser.sh
+# 后台执行: nohup .../repair_omniparser.sh > /tmp/repair_omni.log 2>&1 &
+# 完成后验证: tail -3 /tmp/repair_omni.log（应有 patched 与完成标记）
+```
+
+脚本自动: clone → 下载检测器+图标权重(代理 10808) → 打 config 补丁。约 2-5 分钟。
+env 依赖与 HF 缓存(~/.cache)重启不丢，无需重装。
