@@ -285,12 +285,13 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--report", required=True)
     ap.add_argument("--canvas")
+    # 默认值经数据寻优（bench/tune_rules.py，13 边界样本 84.6%→100%，原验收集零回归）
     ap.add_argument("--align-tol", type=float, default=4.0)
     ap.add_argument("--align-drift", type=float, default=4.0)
-    ap.add_argument("--margin", type=float, default=2.0)
-    ap.add_argument("--spacing-k", type=float, default=2.5)
-    ap.add_argument("--overlap-threshold", type=float, default=0.05)
-    ap.add_argument("--min-overlap-area", type=float, default=400.0)
+    ap.add_argument("--margin", type=float, default=1.0)
+    ap.add_argument("--spacing-k", type=float, default=1.8)
+    ap.add_argument("--overlap-threshold", type=float, default=0.01)
+    ap.add_argument("--min-overlap-area", type=float, default=200.0)
     args = ap.parse_args()
 
     try:

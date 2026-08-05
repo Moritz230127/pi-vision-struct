@@ -1,0 +1,1 @@
+{"schema": "vision-report/v2", "task": "tune", "sensors": ["tune"], "coordsys": "css_px", "source": {"type": "synthetic", "size_px": [800, 600]}, "elements": [{"bbox": [100, 100, 300, 300], "source": ["dom"]}, {"bbox": [296, 100, 496, 300], "source": ["dom"]}]}

@@ -1,0 +1,20 @@
+{
+  "default_score": 0.8461538461538461,
+  "tuned_score": 1.0,
+  "defaults": {
+    "overlap_threshold": 0.05,
+    "min_overlap_area": 400.0,
+    "align_tol": 4.0,
+    "spacing_k": 2.5,
+    "margin": 2.0
+  },
+  "tuned": {
+    "overlap_threshold": 0.01,
+    "min_overlap_area": 200.0,
+    "align_tol": 4.0,
+    "spacing_k": 1.8,
+    "margin": 1.0
+  },
+  "sample_count": 13,
+  "n_evals": 10
+}
