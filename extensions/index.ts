@@ -114,6 +114,7 @@ const MEASURE: Record<string, Act> = {
 			...flag(p, "upscale", "--upscale"),
 			...flag(p, "max_items", "--max-items"),
 			...flag(p, "min_conf", "--min-conf"),
+			...flag(p, "backend", "--backend"),
 		],
 	},
 	wallpaper: {
@@ -181,6 +182,15 @@ const STRUCT: Record<string, Act> = {
 			...flag(p, "image", "--image"),
 			...flag(p, "max_items", "--max-items"),
 			...on(p, "no_ocr", "--no-ocr"),
+		],
+	},
+	layout: {
+		script: "vs_layout.py",
+		timeout: 300000,
+		build: (p) => [
+			...flag(p, "image", "--image"),
+			...flag(p, "max_items", "--max-items"),
+			...flag(p, "min_conf", "--min-conf"),
 		],
 	},
 };
@@ -384,6 +394,12 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 			upscale: Type.Optional(Type.Number({ description: "OCR 放大倍数（默认 2）" })),
 			max_items: Type.Optional(Type.Number({ description: "OCR 最多条数（默认 100）" })),
 			min_conf: Type.Optional(Type.Number({ description: "OCR 最低置信度（默认 0.5）" })),
+			backend: Type.Optional(
+				Type.String({
+					description:
+						"OCR 后端：rapidocr（默认，快 ~2-5s，召回中）/ paddle（PP-OCRv6 medium，高召回但慢 ~7-40s）",
+				}),
+			),
 			enable: Type.Optional(Type.Boolean({ description: "opt-in 开启 L2 语义（semantic）" })),
 			prompt: Type.Optional(Type.String({ description: "语义提示词（semantic，可选）" })),
 			max_tokens: Type.Optional(Type.Number({ description: "语义最大 token（semantic）" })),
@@ -394,14 +410,15 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
-		name: "vs_struct",label: "Structure (dom/pptx/omniparser)",
+		name: "vs_struct",label: "Structure (dom/pptx/omniparser/layout)",
 		description:
-			"L0 源码结构化 + DL 图标感知。actions: dom=网页布局无损真值(必填 url，DOM+computed style 比截图更准)；pptx=PPTX 结构(必填 file，pt 坐标/填充 hex/字体)；omniparser=任意截图图标级 UI 元素+语义描述(必填 image，无 DOM 时的替代；CPU 首载 10-20s，单图 30-60s)。区分：只要文字/颜色用 vs_measure；本工具提供元素结构与源码层证据，输出可传给 vs_fuse 做审计/规则。",
+			"L0 源码结构化 + DL 感知。actions: dom=网页布局无损真值(必填 url，DOM+computed style 比截图更准)；pptx=PPTX 结构(必填 file，pt 坐标/填充 hex/字体)；omniparser=任意截图图标级 UI 元素+语义描述(必填 image，无 DOM 时的替代；CPU 首载 10-20s，单图 30-60s)；layout=文档版式分析 PP-DocLayoutV3(必填 image，标题/正文/图表/表格区域；首次下模型 ~30MB 需代理；与 omniparser 互补：本工具面向文档而非 UI)。区分：只要文字/颜色用 vs_measure；本工具提供元素结构与源码层证据，输出可传给 vs_fuse 做审计/规则。",
 		parameters: Type.Object({
 			action: Type.Union([
 				Type.Literal("dom"),
 				Type.Literal("pptx"),
 				Type.Literal("omniparser"),
+				Type.Literal("layout"),
 			]),
 			url: Type.Optional(Type.String({ description: "要分析的 URL（dom）" })),
 			max_elements: Type.Optional(Type.Number({ description: "最多元素（dom，默认 60）" })),
@@ -409,9 +426,10 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 			file: Type.Optional(Type.String({ description: "pptx 文件路径（pptx）" })),
 			max_shapes: Type.Optional(Type.Number({ description: "最多形状（pptx，默认 200）" })),
 			slide: Type.Optional(Type.Number({ description: "只导出第 N 张（pptx）" })),
-			image: Type.Optional(Type.String({ description: "图片路径（omniparser）" })),
-			max_items: Type.Optional(Type.Number({ description: "最多元素（omniparser，默认 60）" })),
+			image: Type.Optional(Type.String({ description: "图片路径（omniparser/layout）" })),
+			max_items: Type.Optional(Type.Number({ description: "最多元素（omniparser/layout，默认 60）" })),
 			no_ocr: Type.Optional(Type.Boolean({ description: "跳过 OCR 仅图标（omniparser）" })),
+			min_conf: Type.Optional(Type.Number({ description: "最小置信度（layout，默认 0.3）" })),
 		}),
 		async execute(_id, params) {
 			return dispatch(STRUCT, String(params.action), params);

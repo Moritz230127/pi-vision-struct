@@ -35,8 +35,8 @@ DL 感知    vs_omniparser (图标级, CPU) / vs_cluster (CLIP, CPU)    ← 仅�
 
 | 工具 | action | 用途 | env |
 |---|---|---|---|
-| `vs_measure` | capture / pixels / ocr / wallpaper / semantic / env | 截屏、像素测量（颜色/diff/WCAG）、OCR、壁纸分类、L2 语义、环境自检 | pi-vision |
-| `vs_struct` | dom / pptx / omniparser | DOM 结构、PPTX 结构、任意截图图标级元素 | pi-vision / omniparser |
+| `vs_measure` | capture / pixels / ocr / wallpaper / semantic / env | 截屏、像素测量、OCR（双后端 rapid/paddle）、壁纸分类、L2 语义、环境自检 | pi-vision |
+| `vs_struct` | dom / pptx / omniparser / layout | DOM、PPTX、图标级元素、文档版式（PP-DocLayoutV3） | pi-vision / omniparser |
 | `vs_fuse` | analyze / crosscheck / audit / rules / critic | 任务引擎、三方互验、布局审计、设计准则、VLM 复核 | pi-vision |
 | `vs_cluster` | — | CLIP 相似图聚类（确定性） | omniparser |
 

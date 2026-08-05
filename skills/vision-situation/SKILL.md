@@ -13,6 +13,7 @@
 | 网页 DOM 结构（无需截图的布局真值） | `vs_struct` action=dom（需 URL） |
 | PPTX 结构（形状/字体/颜色/坐标） | `vs_struct` action=pptx |
 | 任意截图图标级元素（无 DOM 也可） | `vs_struct` action=omniparser |
+| 文档/论文版式（标题/正文/图表/表格） | `vs_struct` action=layout |
 | 整页诊断管线（DOM+OCR+像素融合） | `vs_fuse` action=analyze task=diagnose-screenshot |
 | DOM↔OCR↔像素三方互验 | `vs_fuse` action=crosscheck |
 | 布局审计（重叠/出界/对比度） | `vs_fuse` action=audit（先有 report JSON） |
@@ -26,7 +27,7 @@
 ### vs_measure（本地测量/感知；pi-vision env）
 - `capture`：Wayland 截屏 → `out`（PNG 路径必填）、`region`（x1,y1,x2,y2 可选）
 - `pixels`：`image` 必填；`regions`(逗号分隔 x1,y1,x2,y2)、`compare`(diff 对比图)、`colors`(主色数)、`wcag`(前景hex,背景hex 逗号分隔)、`threshold`(diff 阈值 默认30)。**返回精确数字：hex+百分比、ΔE、对比度**
-- `ocr`：`image` 必填；`region`(裁剪)、`upscale`(小字放大 默认2)、`max_items`、`min_conf`。**返回 text+4点 bbox+conf**
+- `ocr`：`image` 必填；`region`/`upscale`/`max_items`/`min_conf`/`backend`。**双后端：rapidocr**(默认, 快 ~2-5s) / **paddle**(PP-OCRv6 medium, 慢 ~7-40s, 复杂版式优先)；返回 text+4点 bbox+conf
 - `wallpaper`：`dir` 必填；`colors`/`max_files`/`ext`/`semantic`(opt-in L2)
 - `semantic`：`image` 必填；`enable=true` 才执行（L2 有思考成本）；`prompt` 可自定义
 - `env`：环境自检（无参数）
@@ -35,6 +36,7 @@
 - `dom`：`url` 必填；`max_elements`(默认60)、`screenshot`(会话截图路径)。**DOM+computed style：tag/role/text/bbox/color/font/z-index**
 - `pptx`：`file` 必填；`max_shapes`、`slide`。**pt 坐标、填充 hex、字号/色**
 - `omniparser`：`image` 必填；`max_items`、`no_ocr`。**图标级元素 + Florence-2 语义描述；CPU 首载 10-20s，单图 30-60s**
+- `layout`：`image` 必填；`max_items`、`min_conf`。**文档版式 PP-DocLayoutV3：标题/正文/图表/表格区域；首次下模型 ~30MB**
 
 ### vs_fuse（确定性融合/准则；pi-vision env）
 - `analyze`：`task` 必填（diagnose-screenshot/audit-pptx/classify-images）；`input`/`url`/`dpr` 可选。**多步传感器+融合合并报告**
