@@ -15,6 +15,8 @@
 | PPTX 结构（形状/字体/颜色/坐标） | `vs_struct` action=pptx |
 | 任意截图图标级元素（无 DOM 也可） | `vs_struct` action=omniparser |
 | 文档/论文版式（标题/正文/图表/表格） | `vs_struct` action=layout |
+| PDF 文本块抽取（pt 坐标） | `vs_struct` action=pdf |
+| 跨时间截图 diff（今天 vs 上周） | `vs_fuse` analyze task=diff-screenshots（传 input+compare） |
 | 整页诊断管线（DOM+OCR+像素融合） | `vs_fuse` action=analyze task=diagnose-screenshot |
 | DOM↔OCR↔像素三方互验 | `vs_fuse` action=crosscheck |
 | 布局审计（重叠/出界/对比度） | `vs_fuse` action=audit（先有 report JSON） |
@@ -38,6 +40,7 @@
 - `pptx`：`file` 必填；`max_shapes`、`slide`。**pt 坐标、填充 hex、字号/色**
 - `omniparser`：`image` 必填；`max_items`、`no_ocr`。**图标级元素 + Florence-2 语义描述；走本地常驻服务（模型驻留：稀疏图 ~4s，密集图 ~37s；服务自动拉起，无需手动管理）**
 - `layout`：`image` 必填；`max_items`、`min_conf`。**文档版式 PP-DocLayoutV3：标题/正文/图表/表格区域；首次下模型 ~30MB**
+- `pdf`：`file` 必填；`pages`(如 1-3)、`render_dir`(渲染页面供版式分析)。**PyMuPDF 文本块(pt 坐标)**
 
 ### vs_fuse（确定性融合/准则；pi-vision env）
 - `analyze`：`task` 必填（diagnose-screenshot/audit-pptx/classify-images）；`input`/`url`/`dpr` 可选。**多步传感器+融合合并报告**

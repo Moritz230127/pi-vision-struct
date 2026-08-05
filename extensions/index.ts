@@ -30,6 +30,49 @@ const PKG_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PY = (name: string) => `${PKG_ROOT}python/${name}`;
 const BWRAP = PY("setup/vs_bwrap.sh"); // 严格本地化沙箱（零网络 + 只读根）
 
+// 失败日志（本地、有上限）：工具报错时记录 {ts, tool, args, error}。
+// 用途：真实失败分布 → 数据驱动的下一轮优化决策。目录 ~/.cache/vs-failures/
+import {
+	appendFileSync,
+	mkdirSync,
+	renameSync,
+	readFileSync,
+	statSync,
+} from "node:fs";
+import { homedir } from "node:os";
+
+const FAIL_DIR = `${homedir()}/.cache/vs-failures`;
+const FAIL_FILE = `${FAIL_DIR}/failures.jsonl`;
+const FAIL_MAX_BYTES = 512 * 1024; // 0.5MB 上限，超限轮转（保留最近 150 条）
+
+function logFailure(tool: string, args: string[], detail: string): void {
+	try {
+		mkdirSync(FAIL_DIR, { recursive: true });
+		const entry =
+			JSON.stringify({
+				ts: Date.now(),
+				tool,
+				args: args.slice(0, 12),
+				detail: detail.slice(0, 300),
+			}) + "\n";
+		appendFileSync(FAIL_FILE, entry);
+		try {
+			if (statSync(FAIL_FILE).size > FAIL_MAX_BYTES) {
+				const keep = readFileSync(FAIL_FILE, "utf-8")
+					.split("\n")
+					.slice(-150)
+					.join("\n");
+				appendFileSync(`${FAIL_FILE}.tmp`, keep);
+				renameSync(`${FAIL_FILE}.tmp`, FAIL_FILE);
+			}
+		} catch {
+			// 轮转失败不影响主路径
+		}
+	} catch {
+		// 日志失败不影响工具本身
+	}
+}
+
 function runPython(
 	pythonBin: string,
 	args: string[],
@@ -42,12 +85,14 @@ function runPython(
 		// （依赖宿主 Ollama 的 127.0.0.1，硬编码无用户可控目标，已审计）。
 		const cmd = sandbox ? BWRAP : pythonBin;
 		const cmdArgs = sandbox ? [pythonBin, ...args] : args;
+		const tool = args[0] ? args[0].split("/").pop() ?? args[0] : pythonBin;
 		execFile(
 			cmd,
 			cmdArgs,
 			{ timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 },
 			(err, stdout, stderr) => {
 				if (err) {
+					logFailure(tool, args, String(stderr || err.message || err));
 					resolve(
 						JSON.stringify({
 							error: "python failed",
@@ -56,7 +101,11 @@ function runPython(
 						}),
 					);
 				} else {
-					resolve(stdout.trim());
+					const out = stdout.trim();
+					if (out.startsWith("{") && out.includes('"error"')) {
+						logFailure(tool, args, out.slice(0, 300));
+					}
+					resolve(out);
 				}
 			},
 		);
@@ -204,6 +253,16 @@ const STRUCT: Record<string, Act> = {
 			...flag(p, "min_conf", "--min-conf"),
 		],
 	},
+	pdf: {
+		script: "vs_pdf.py",
+		timeout: 120000,
+		build: (p) => [
+			...flag(p, "file", "--file"),
+			...flag(p, "pages", "--pages"),
+			...flag(p, "max_items", "--max-items"),
+			...flag(p, "render_dir", "--render-dir"),
+		],
+	},
 };
 
 const FUSE: Record<string, Act> = {
@@ -215,6 +274,7 @@ const FUSE: Record<string, Act> = {
 			...flag(p, "input", "--input"),
 			...flag(p, "url", "--url"),
 			...flag(p, "dpr", "--dpr"),
+			...flag(p, "compare", "--compare"),
 		],
 	},
 	crosscheck: {
@@ -432,13 +492,14 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "vs_struct",label: "Structure (dom/pptx/omniparser/layout)",
 		description:
-			"L0 源码结构化 + DL 感知。actions: dom=网页布局无损真值(必填 url，DOM+computed style 比截图更准)；pptx=PPTX 结构(必填 file，pt 坐标/填充 hex/字体)；omniparser=任意截图图标级 UI 元素+语义描述(必填 image，无 DOM 时的替代；CPU 首载 10-20s，单图 30-60s)；layout=文档版式分析 PP-DocLayoutV3(必填 image，标题/正文/图表/表格区域；首次下模型 ~30MB 需代理；与 omniparser 互补：本工具面向文档而非 UI)。区分：只要文字/颜色用 vs_measure；本工具提供元素结构与源码层证据，输出可传给 vs_fuse 做审计/规则。",
+			"L0 源码结构化 + DL 感知。actions: dom=网页布局无损真值(必填 url，DOM+computed style 比截图更准)；pptx=PPTX 结构(必填 file，pt 坐标/填充 hex/字体)；omniparser=任意截图图标级 UI 元素+语义描述(必填 image，无 DOM 时的替代；CPU 首载 10-20s，单图 30-60s)；layout=文档版式分析 PP-DocLayoutV3(必填 image，标题/正文/图表/表格区域；首次下模型 ~30MB 需代理；与 omniparser 互补：本工具面向文档而非 UI)；pdf=PDF 文本块抽取(必填 file，pt 坐标，可选 pages/render_dir 渲染页面供版式分析)。区分：只要文字/颜色用 vs_measure；本工具提供元素结构与源码层证据，输出可传给 vs_fuse 做审计/规则。",
 		parameters: Type.Object({
 			action: Type.Union([
 				Type.Literal("dom"),
 				Type.Literal("pptx"),
 				Type.Literal("omniparser"),
 				Type.Literal("layout"),
+				Type.Literal("pdf"),
 			]),
 			url: Type.Optional(Type.String({ description: "要分析的 URL（dom）" })),
 			max_elements: Type.Optional(Type.Number({ description: "最多元素（dom，默认 60）" })),
@@ -450,6 +511,8 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 			max_items: Type.Optional(Type.Number({ description: "最多元素（omniparser/layout，默认 60）" })),
 			no_ocr: Type.Optional(Type.Boolean({ description: "跳过 OCR 仅图标（omniparser）" })),
 			min_conf: Type.Optional(Type.Number({ description: "最小置信度（layout，默认 0.3）" })),
+			pages: Type.Optional(Type.String({ description: "PDF 页范围 1-3 或 all（pdf）" })),
+			render_dir: Type.Optional(Type.String({ description: "渲染页面输出目录（pdf，可选）" })),
 		}),
 		async execute(_id, params) {
 			return dispatch(STRUCT, String(params.action), params);
@@ -469,6 +532,7 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 				Type.Literal("critic"),
 			]),
 			task: Type.Optional(Type.String({ description: "任务名（analyze）" })),
+			compare: Type.Optional(Type.String({ description: "对比图路径（analyze diff-screenshots 任务）" })),
 			input: Type.Optional(Type.String({ description: "输入 图片/pptx/目录（analyze）" })),
 			url: Type.Optional(Type.String({ description: "URL（analyze 的 DOM 源）" })),
 			dpr: Type.Optional(Type.Number({ description: "DPR（默认 1.0）" })),

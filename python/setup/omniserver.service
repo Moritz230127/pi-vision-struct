@@ -1,0 +1,22 @@
+# omniserver.service — OmniParser 常驻服务（可选，默认自动拉起无需此单元）
+# 安装:
+#   cp python/setup/omniserver.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now omniserver
+# 说明: 扩展默认在首次调用时自动拉起 daemon（懒加载），本单元仅供
+# 希望常驻/开机自启/崩溃自动重启的场景。二者互斥——启用本单元后
+# vs_omniparser 的 auto-spawn 会检测到已有 socket 直接复用。
+[Unit]
+Description=OmniParser resident daemon (pi-vision-struct)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/Arch/conda-envs/omniparser/bin/python -u /home/Arch/.pi-extensions/pi-vision-struct/python/omniserver.py --socket %h/.cache/omniparser/omniserver.sock
+Restart=on-failure
+RestartSec=3
+StandardOutput=append:%h/.cache/omniparser/daemon.log
+StandardError=append:%h/.cache/omniparser/daemon.log
+
+[Install]
+WantedBy=default.target

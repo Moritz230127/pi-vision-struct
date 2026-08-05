@@ -49,6 +49,7 @@ def main() -> int:
     ap.add_argument("--task", required=True)
     ap.add_argument("--input")
     ap.add_argument("--url")
+    ap.add_argument("--compare", help="diff 任务的对比图路径（$COMPARE）")
     ap.add_argument("--dpr", type=float, default=1.0)
     ap.add_argument("--timeout", type=int, default=180)
     args = ap.parse_args()
@@ -62,6 +63,7 @@ def main() -> int:
 
         vars_map: dict[str, str] = {
             "INPUT": args.input or "", "URL": args.url or "", "DPR": str(args.dpr),
+            "COMPARE": args.compare or "",
         }
         outputs: dict[str, str] = {}
         skipped: list[str] = []

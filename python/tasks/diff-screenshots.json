@@ -1,0 +1,36 @@
+{
+    "name": "diff-screenshots",
+    "description": "跨时间截图对比：两张截图（如今天 vs 上周）的像素级差异定位 + 各自主色",
+    "steps": [
+        {
+            "as": "diff",
+            "cmd": [
+                "vs_pix.py",
+                "--image",
+                "$INPUT",
+                "--compare",
+                "$COMPARE"
+            ]
+        },
+        {
+            "as": "pix_a",
+            "cmd": [
+                "vs_pix.py",
+                "--image",
+                "$INPUT",
+                "--colors",
+                "5"
+            ]
+        },
+        {
+            "as": "pix_b",
+            "cmd": [
+                "vs_pix.py",
+                "--image",
+                "$COMPARE",
+                "--colors",
+                "5"
+            ]
+        }
+    ]
+}
