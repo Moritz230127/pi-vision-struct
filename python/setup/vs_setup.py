@@ -18,18 +18,38 @@
 import argparse
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+IS_WIN = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
+BIN_DIR = "Scripts" if IS_WIN else "bin"
+PY_EXE = "python.exe" if IS_WIN else "python"
+
 HOME = Path.home()
-DEFAULT_ENVS = HOME / "conda-envs"
 PKGS = HOME / "conda-pkgs"
 ROOT = Path(__file__).resolve().parent.parent.parent  # 包根（pi-vision-struct/）
 REQ = ROOT / "python" / "requirements.txt"
 REQ_OMNI = ROOT / "python" / "requirements-omniparser.txt"
 SELF_TESTS = ROOT / "tests" / "run_self_tests.py"
+
+# 平台默认 envs 目录：Linux 沿用 ~/conda-envs；macOS/Windows 用 conda 自带 envs
+DEFAULT_ENVS = HOME / "conda-envs"
+if IS_MAC:
+    DEFAULT_ENVS = HOME / "miniforge3" / "envs"
+if IS_WIN:
+    DEFAULT_ENVS = Path(os.environ.get("USERPROFILE", str(HOME))) / "miniforge3" / "envs"
+
+CONFIG_DIR = Path(os.environ.get("APPDATA", str(HOME / ".config"))) if IS_WIN else HOME / ".config"
+CONFIG_FILE = CONFIG_DIR / "pi-vision-struct.json"
+
+
+def _conda_bin(name: str) -> str:
+    return f"{name}.bat" if IS_WIN else name
+
 
 MAMBA_LOCATIONS = [
     "/opt/miniforge/condabin/mamba", "/opt/miniconda3/condabin/mamba",
@@ -38,10 +58,15 @@ MAMBA_LOCATIONS = [
     str(HOME / "mambaforge" / "condabin" / "mamba"),
 ]
 CONDA_LOCATIONS = [p.replace("mamba", "conda") for p in MAMBA_LOCATIONS]
+if IS_WIN:
+    CONDA_LOCATIONS += [
+        str(HOME / "miniforge3" / "condabin" / "conda.bat"),
+        str(HOME / "miniconda3" / "condabin" / "conda.bat"),
+    ]
 
 
 def find_conda() -> str:
-    for cmd in ("mamba", "conda"):
+    for cmd in (_conda_bin("mamba"), _conda_bin("conda")):
         p = shutil.which(cmd)
         if p:
             return p
@@ -52,7 +77,36 @@ def find_conda() -> str:
 
 
 def env_python(envs: Path, name: str) -> Path:
-    return envs / name / "bin" / "python"
+    return envs / name / BIN_DIR / PY_EXE
+
+
+def detect_capture() -> str:
+    """探测可用截图后端：grim(linux-wayland) > screencapture(mac) > mss"""
+    if IS_MAC and shutil.which("screencapture"):
+        return "screencapture"
+    if not IS_WIN and shutil.which("grim"):
+        return "grim"
+    try:
+        import mss  # type: ignore[import-not-found]
+
+        return "mss"
+    except ImportError:
+        return "none"
+
+
+def write_config(pi_py: Path, omni_py: Path, envs: Path) -> None:
+    """写入跨平台配置（扩展启动时读取）。"""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    cfg = {
+        "pi_vision_python": str(pi_py),
+        "omniparser_python": str(omni_py),
+        "envs_dir": str(envs),
+        "sandbox_enabled": (not IS_WIN and shutil.which("bwrap") is not None),
+        "capture_backend": detect_capture(),
+        "installed_by": "vs_setup.py",
+    }
+    CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"  配置已写入: {CONFIG_FILE}")
 
 
 def base_env(envs_dir: Path) -> dict:
@@ -212,9 +266,12 @@ def main() -> int:
                 "需手动：运行 python/setup/repair_omniparser.sh 下载权重（~/.cache/omniparser），见 docs/omniparser-setup.md"))
 
     ok = all(s["status"] == "ok" for s in steps)
+    if ok and not args.dry_run:
+        write_config(py, omni_py, envs)
     print(json.dumps({
         "ok": ok, "mode": "setup",
         "conda": conda, "envs_dir": str(envs), "dry_run": args.dry_run,
+        "config_file": str(CONFIG_FILE) if ok and not args.dry_run else None,
         "steps": steps,
         "next": ["pi install npm:pi-vision-struct 后重启 pi，工具即可用"]
         if ok else ["修复失败步骤后重跑 /vs setup"],

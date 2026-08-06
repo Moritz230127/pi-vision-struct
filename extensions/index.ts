@@ -23,23 +23,72 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 
-const DEFAULT_PYTHON = "/home/Arch/conda-envs/pi-vision/bin/python";
-const OMNI_PYTHON = "/home/Arch/conda-envs/omniparser/bin/python";
 const PKG_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PY = (name: string) => `${PKG_ROOT}python/${name}`;
+
+// ---- 跨平台 python 解析：env > 配置文件 > 平台候选路径 > PATH ----
+const HOME = homedir();
+const isWin = process.platform === "win32";
+const BIN = isWin ? "Scripts" : "bin";
+const EXE = isWin ? ".exe" : "";
+const CONFIG_DIR = isWin
+	? process.env.APPDATA ?? `${HOME}/AppData/Roaming`
+	: process.env.XDG_CONFIG_HOME ?? `${HOME}/.config`;
+const CONFIG_FILE = `${CONFIG_DIR}/pi-vision-struct.json`;
+
+function readConfig(): Record<string, string> {
+	try {
+		if (!existsSync(CONFIG_FILE)) return {};
+		const cfg = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+		return typeof cfg === "object" && cfg ? cfg : {};
+	} catch {
+		return {};
+	}
+}
+
+function candidatePython(envName: string): string[] {
+	// 安装器 vs_setup.py 会写配置文件；此处为无配置时的候选路径
+	const cands: string[] = [
+		`${HOME}/conda-envs/${envName}/${BIN}/python${EXE}`,
+		`${HOME}/miniforge3/envs/${envName}/${BIN}/python${EXE}`,
+		`${HOME}/miniconda3/envs/${envName}/${BIN}/python${EXE}`,
+		`${HOME}/mambaforge/envs/${envName}/${BIN}/python${EXE}`,
+	];
+	return cands;
+}
+
+function resolvePython(envName: string, envVar: string): string {
+	if (process.env[envVar]) return process.env[envVar]!;
+	const cfg = readConfig();
+	const key = envName === "pi-vision" ? "pi_vision_python" : "omniparser_python";
+	if (cfg[key] && existsSync(cfg[key]!)) return cfg[key]!;
+	for (const c of candidatePython(envName)) {
+		if (existsSync(c)) return c;
+	}
+	return isWin ? "python" : "python3";
+}
+
+const DEFAULT_PYTHON = resolvePython("pi-vision", "PI_VISION_PYTHON");
+const OMNI_PYTHON = resolvePython("omniparser", "PI_VISION_OMNI_PYTHON");
+// Linux 且 bwrap 存在且未禁用 → 沙箱；其他平台自动降级为无沙箱
+const SANDBOX_ENABLED =
+	process.platform === "linux" &&
+	process.env.VS_NO_SANDBOX !== "1" &&
+	existsSync(PY("setup/vs_bwrap.sh"));
 const BWRAP = PY("setup/vs_bwrap.sh"); // 严格本地化沙箱（零网络 + 只读根）
 
 // 失败日志（本地、有上限）：工具报错时记录 {ts, tool, args, error}。
 // 用途：真实失败分布 → 数据驱动的下一轮优化决策。目录 ~/.cache/vs-failures/
+// （fs/os 已在顶部导入，这里只补 append/mkdir/rename/stat）
 import {
 	appendFileSync,
 	mkdirSync,
 	renameSync,
-	readFileSync,
 	statSync,
 } from "node:fs";
-import { homedir } from "node:os";
 
 const FAIL_DIR = `${homedir()}/.cache/vs-failures`;
 const FAIL_FILE = `${FAIL_DIR}/failures.jsonl`;
@@ -83,8 +132,10 @@ function runPython(
 		// 沙箱: bwrap 内核隔离（--unshare-net 零网络、--ro-bind / 只读根）。
 		// 豁免（sandbox=false）: dom（本职加载用户 URL）/ critic / semantic
 		// （依赖宿主 Ollama 的 127.0.0.1，硬编码无用户可控目标，已审计）。
-		const cmd = sandbox ? BWRAP : pythonBin;
-		const cmdArgs = sandbox ? [pythonBin, ...args] : args;
+		// 非 Linux / 无 bwrap 平台自动无沙箱（配置或 VS_NO_SANDBOX 可禁用）。
+		const useSandbox = SANDBOX_ENABLED && sandbox;
+		const cmd = useSandbox ? BWRAP : pythonBin;
+		const cmdArgs = useSandbox ? [pythonBin, ...args] : args;
 		const tool = args[0] ? args[0].split("/").pop() ?? args[0] : pythonBin;
 		execFile(
 			cmd,

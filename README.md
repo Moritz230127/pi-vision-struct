@@ -4,20 +4,27 @@
 
 全部工具**只读、本地、无网络外发**（Ollama 仅 localhost）。Python 运行于 conda env。
 
-## 安装
+## 安装（三系统）
 
 ```bash
-pi install npm:pi-vision-struct      # 或 pi install /path/to/pi-vision-struct
+# 方式一：从 GitHub 安装（推荐，公开仓库）
+pi install git:github.com/Moritz230127/pi-vision-struct
+
+# 方式二：本地安装
+pi install /path/to/pi-vision-struct
 ```
 
-首次使用前运行引导安装（自动检测/创建 conda env + 依赖 + 自测）：
+首次使用前运行安装器（自动创建 conda env + 依赖 + 模型 + 自测 + 写配置）：
 
-```text
-/vs setup            # 核心安装（默认 dry-run 展示计划；env 已存在时直接执行）
-/vs setup --with-omniparser   # 附加 OmniParser env（图标级元素）
-/vs setup --with-dom          # 附加 playwright firefox（dom_dump）
-/vs check            # 只读健康检查
-```
+| 系统 | 命令 | 备注 |
+|---|---|---|
+| Linux | `bash python/setup/install-linux.sh [--with-omniparser] [--with-dom]` | 内核沙箱（bwrap）+ grim/mss 截图 |
+| macOS | `bash python/setup/install-macos.sh [--with-omniparser] [--with-dom]` | 内置 screencapture 截图；无沙箱（自动降级） |
+| Windows | `powershell -ExecutionPolicy Bypass -File python\setup\install-windows.ps1 [-WithOmniparser] [-WithDom]` | 需 `pip install mss` 才有截图 |
+
+依赖：conda/mamba（Miniforge）。安装器自动检测平台、定位/创建 env、下载模型（`--proxy URL` 走代理）、
+把 python 路径写入 `~/.config/pi-vision-struct.json`（Windows 为 %APPDATA%），扩展启动时自动读取。
+平台差异：沙箱仅 Linux（bwrap）；截图后端按 grim/screencapture/mss 自动探测。
 
 ## 架构：分层无损通道（vision-report/v2）
 
