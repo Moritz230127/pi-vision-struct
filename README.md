@@ -4,6 +4,27 @@
 
 全部工具**只读、本地、无网络外发**（Ollama 仅 localhost）。Python 运行于 conda env。
 
+## Docker 容器（零安装即用）
+
+```bash
+# 拉取（GHCR）或本地构建（需 5GB 空间，构建 ~15 分钟）
+docker pull ghcr.io/moritz230127/pi-vision-struct:latest
+# 或: docker build -t pi-vision-struct:latest .
+
+# 使用：挂载工作目录，按 action 调用
+docker run --rm -v "$PWD":/work pi-vision-struct:latest env          # 环境自检
+docker run --rm -v "$PWD":/work pi-vision-struct:latest pix --image /work/a.png --colors 3
+docker run --rm -v "$PWD":/work pi-vision-struct:latest ocr --image /work/a.png
+docker run --rm -v "$PWD":/work pi-vision-struct:latest omniparser --image /work/a.png
+docker run --rm -v "$PWD":/work pi-vision-struct:latest layout --image /work/a.png   # 首次运行自动拉 ~300MB 模型
+docker run --rm -v "$PWD":/work pi-vision-struct:latest cluster --files "/work/a.png,/work/b.png"
+docker run --rm -v "$PWD":/work pi-vision-struct:latest pdf --file /work/doc.pdf
+docker run --rm -v "$PWD":/work pi-vision-struct:latest help
+```
+
+镜像已烘焙：OmniParser 权重、Florence-2-base、CLIP（cluster 离线可用）。
+layout 首次运行自动下载 paddle 模型（内置 hf-mirror 镜像加速）；已有 `~/.paddlex` 缓存可挂载：`-v ~/.paddlex:/root/.paddlex`。
+
 ## 安装（三系统）
 
 ```bash
