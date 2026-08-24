@@ -11,6 +11,7 @@
 """
 import argparse
 import json
+import vs_schema as S
 import shutil
 import subprocess
 import sys
@@ -83,20 +84,19 @@ def main() -> int:
             detail = "mss"
 
     if not ok:
-        print(json.dumps({
+        print(S.dump_json({
             "error": "capture failed",
             "detail": f"后端 {detail} 不可用或执行失败。Linux 请装 grim（Wayland）或 mss；"
                       f"macOS 内置 screencapture；Windows 需 `pip install mss`",
-        }, ensure_ascii=False))
+        }))
         return 1
 
     from PIL import Image  # type: ignore[import-not-found]
 
     im = Image.open(args.out)
-    print(json.dumps({"schema": "vision-report/v1",
+    print(S.dump_json({"schema": "vision-report/v1",
                       "source": {"type": "screenshot", "path": args.out,
-                                 "size_px": list(im.size), "backend": detail}},
-                     ensure_ascii=False))
+                                 "size_px": list(im.size), "backend": detail}}))
     return 0
 
 

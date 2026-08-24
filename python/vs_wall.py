@@ -10,6 +10,7 @@
 """
 import argparse
 import json
+import vs_schema as S
 import sys
 from collections import Counter
 from pathlib import Path
@@ -186,14 +187,14 @@ def main() -> int:
             "by_family": dict(Counter(str(i.get("programmatic", {}).get("family", "?")) for i in items if "programmatic" in i)),
         }
 
-        print(json.dumps({
+        print(S.dump_json({
             "schema": "vision-report/v1",
             "source": {"type": "wallpaper_batch", "dir": str(args.dir),
                        "count": len(items), "truncated": len(items) >= args.max_files},
             "items": items,
             "groups": groups,
             "semantic": {"enabled": args.semantic, "failures": semantic_failures},
-        }, ensure_ascii=False))
+        }))
         return 0
     except Exception as e:
         print(json.dumps({"error": "vs_wall failed", "detail": str(e)[:500]}, ensure_ascii=False))

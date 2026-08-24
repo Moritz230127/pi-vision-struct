@@ -10,6 +10,7 @@
 """
 import argparse
 import json
+import vs_schema as S
 import sys
 from typing import Any, cast
 
@@ -159,7 +160,7 @@ def main() -> int:
                 for c in comps
             ]
 
-        print(json.dumps(out, ensure_ascii=False))
+        print(S.dump_json(out))
         return 0
     except Exception as e:  # 永不崩溃：任何错误都以 JSON 形式输出
         print(json.dumps({"error": "vs_pix failed", "detail": str(e)[:500]}, ensure_ascii=False))

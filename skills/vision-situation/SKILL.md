@@ -16,6 +16,7 @@
 | 任意截图图标级元素（无 DOM 也可） | `vs_struct` action=omniparser |
 | 文档/论文版式（标题/正文/图表/表格） | `vs_struct` action=layout |
 | PDF 文本块抽取（pt 坐标） | `vs_struct` action=pdf |
+| 桌面原生应用结构（角色/名称/屏幕坐标） | `vs_struct` action=a11y（先 `list=true` 列应用） |
 | 跨时间截图 diff（今天 vs 上周） | `vs_fuse` analyze task=diff-screenshots（传 input+compare） |
 | 整页诊断管线（DOM+OCR+像素融合） | `vs_fuse` action=analyze task=diagnose-screenshot |
 | DOM↔OCR↔像素三方互验 | `vs_fuse` action=crosscheck |
@@ -25,12 +26,17 @@
 | 相似图片分组（壁纸/截图聚类） | `vs_cluster` |
 | 环境自检 | `vs_measure` action=env 或 `/vs check` |
 
+> **高分辨率 zoom-in 工作流**：先整图 `ocr`/`pixels` 粗扫 → 对疑点区域带
+> `region=x1,y1,x2,y2` 重跑同工具细查（小字叠加 `upscale=3`）。两轮坐标同一坐标系，
+> 推理时直接用报告里的 `[bbox: x1,y1,x2,y2]` / `[point: x,y]` 原语记法引用位置，
+> 不要用“左边的元素”这类相对方位描述。
+
 ## 二、命令参考
 
 ### vs_measure（本地测量/感知；pi-vision env）
 - `capture`：Wayland 截屏 → `out`（PNG 路径必填）、`region`（x1,y1,x2,y2 可选）
 - `pixels`：`image` 必填；`regions`(逗号分隔 x1,y1,x2,y2)、`compare`(diff 对比图)、`colors`(主色数)、`wcag`(前景hex,背景hex 逗号分隔)、`threshold`(diff 阈值 默认30)。**返回精确数字：hex+百分比、ΔE、对比度**
-- `ocr`：`image` 必填；`region`/`upscale`/`max_items`/`min_conf`/`backend`/`preprocess`(contrast 低对比度用)。**双后端：rapidocr**(默认, 快 ~2-5s) / **paddle**(PP-OCRv6 medium, 慢 ~7-40s)；返回 text+4点 bbox+conf
+- `ocr`：`image` 必填；`region`/`upscale`/`max_items`/`min_conf`/`backend`/`preprocess`(contrast 低对比度用)/`daemon`(auto|always|never，默认 auto)。**双后端：rapidocr**(默认, 快 ~2-5s) / **paddle**(PP-OCRv6 medium 高召回；默认走常驻服务 ocrserver——自动拉起、模型驻留、单图亚秒级；never=直连冷载 ~7-40s)；返回 text+4点 bbox+conf
 - `wallpaper`：`dir` 必填；`colors`/`max_files`/`ext`/`semantic`(opt-in L2)
 - `semantic`：`image` 必填；`enable=true` 才执行（L2 有思考成本）；`prompt` 可自定义
 - `env`：环境自检（无参数）
@@ -41,6 +47,7 @@
 - `omniparser`：`image` 必填；`max_items`、`no_ocr`。**图标级元素 + Florence-2 语义描述；走本地常驻服务（模型驻留：稀疏图 ~4s，密集图 ~37s；服务自动拉起，无需手动管理）**
 - `layout`：`image` 必填；`max_items`、`min_conf`。**文档版式 PP-DocLayoutV3：标题/正文/图表/表格区域；首次下模型 ~30MB**
 - `pdf`：`file` 必填；`pages`(如 1-3)、`render_dir`(渲染页面供版式分析)。**PyMuPDF 文本块(pt 坐标)**
+- `a11y`：可选 `app`(应用名过滤)、`list=true`(仅列应用)、`max_elements`(默认80)、`with_text`(文本类角色抓内容前300字)。**AT-SPI 无障碍树：原生应用的 DOM 等价物，screen_px 坐标；走系统 python3（需 python-gobject）**
 
 ### vs_fuse（确定性融合/准则；pi-vision env）
 - `analyze`：`task` 必填（diagnose-screenshot/audit-pptx/classify-images）；`input`/`url`/`dpr` 可选。**多步传感器+融合合并报告**

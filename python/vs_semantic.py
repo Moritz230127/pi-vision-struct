@@ -14,6 +14,7 @@ import argparse
 import base64
 import io
 import json
+import vs_schema as S
 import os
 import sys
 import urllib.request
@@ -65,38 +66,15 @@ def classify(
 ) -> dict:
     """调用本地 Ollama qwen3-vl:8b 生成语义标签。永不抛异常，失败返回 {"ok": False, ...}。"""
     try:
-        im = Image.open(image_path).convert("RGB")
-        w, h = im.size
-        scale = max_side / max(w, h)
-        if scale < 1:
-            im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)  # type: ignore[attr-defined]
-        buf = io.BytesIO()
-        im.save(buf, format="PNG")
-        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-
-        body = {
-            "model": model,
-            "prompt": prompt or DEFAULT_PROMPT,
-            "images": [b64],
-            "stream": False,
-            "think": False,  # 此 Ollama 版本对该模型无效（思考型变体），保留无害
-            "options": {
-                "num_ctx": num_ctx,
-                "num_predict": max_tokens,
-                "temperature": 0.2,
-            },
-        }
-        req = urllib.request.Request(
-            "http://localhost:11434/api/generate",
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        text = str(data.get("response", "")).strip()
+        import vs_vlm
+        b64 = vs_vlm.image_to_b64(image_path, max_side=max_side)
+        r = vs_vlm.generate(prompt or DEFAULT_PROMPT, b64, model=model,
+                            num_ctx=num_ctx, max_tokens=max_tokens, timeout=timeout)
+        if not r["ok"]:
+            return {"ok": False, "error": r["error"]}
+        text = r["text"]
         return {"ok": True, "raw": text, "parsed": _try_parse_json(text), "model": model,
-                "eval_count": data.get("eval_count"), "done_reason": data.get("done_reason")}
+                "eval_count": r["eval_count"], "done_reason": r["done_reason"]}
     except Exception as e:
         return {"ok": False, "error": str(e)[:500]}
 
@@ -119,21 +97,21 @@ def main() -> int:
         return 1
 
     if not (args.enable or os.environ.get("PI_VISION_SEMANTIC") == "1"):
-        print(json.dumps({
+        print(S.dump_json({
             "schema": "vision-report/v1",
             "source": {"type": "image", "path": args.image, "size_px": size_px},
             "semantic": {"enabled": False,
                          "reason": "opt-in: 传 --enable 或设 PI_VISION_SEMANTIC=1"},
-        }, ensure_ascii=False))
+        }))
         return 0
 
     result = classify(args.image, prompt=args.prompt, model=args.model,
                       max_tokens=args.max_tokens, timeout=args.timeout)
-    print(json.dumps({
+    print(S.dump_json({
         "schema": "vision-report/v1",
         "source": {"type": "image", "path": args.image, "size_px": size_px},
         "semantic": {"enabled": True, **result},
-    }, ensure_ascii=False))
+    }))
     return 0
 
 

@@ -86,15 +86,14 @@ def main() -> int:
                         best_de, best_pt, best_rgb = de, pt, rgb
                 if best_de is not None and best_pt is not None and best_rgb is not None \
                         and best_de > args.color_threshold:
-                    anomalies.append({
-                        "type": "color_drift",
-                        "bbox": bbox,
-                        "confidence": round(min(0.99, best_de / 100 + 0.5), 2),
-                        "evidence": {"dom_color": declared, "pixel_color": S.rgb_to_hex(best_rgb),
-                                     "delta_e76": round(best_de, 1),
-                                     "sample_point": list(best_pt), "samples": len(samples)},
-                        "suggested_cause": "computed style 未生效或被覆盖，或截图与 DOM 状态不一致",
-                    })
+                    anomalies.append(S.anomaly(
+                        "color_drift", bbox,
+                        {"dom_element_id": el.get("id"), "dom_color": declared,
+                         "pixel_color": S.rgb_to_hex(best_rgb),
+                         "delta_e76": round(best_de, 1),
+                         "sample_point": list(best_pt), "samples": len(samples)},
+                        round(min(0.99, best_de / 100 + 0.5), 2),
+                        "computed style 未生效或被覆盖，或截图与 DOM 状态不一致"))
 
         # ---------- 2) 文本交叉验证：DOM vs OCR ----------
         if dom and ocr:
@@ -110,13 +109,12 @@ def main() -> int:
                     ob = [round(v) for v in o["bbox"]]
                     best = max(best, S.bbox_iou(bbox, ob))
                 if best == 0.0:
-                    anomalies.append({
-                        "type": "text_missing_in_ocr",
-                        "bbox": bbox,
-                        "confidence": 0.6,
-                        "evidence": {"dom_text": el["text"][:100], "max_iou_with_ocr": best},
-                        "suggested_cause": "元素未绘制/被遮挡/为 canvas 渲染，或 OCR 漏读",
-                    })
+                    anomalies.append(S.anomaly(
+                        "text_missing_in_ocr", bbox,
+                        {"dom_element_id": el.get("id"), "dom_text": el["text"][:100],
+                         "max_iou_with_ocr": best},
+                        0.6,
+                        "元素未绘制/被遮挡/为 canvas 渲染，或 OCR 漏读"))
             # OCR 文本不在 DOM（采样前 20 个避免噪音）
             for o in ocr_texts[:20]:
                 ob = [round(v) for v in o["bbox"]]
@@ -124,13 +122,12 @@ def main() -> int:
                 for el in dom_texts:
                     best = max(best, S.bbox_iou(ob, dom_bbox_device(el, dpr)))
                 if best == 0.0 and len(o.get("text", "")) > 1:
-                    anomalies.append({
-                        "type": "text_not_in_dom",
-                        "bbox": ob,
-                        "confidence": 0.5,
-                        "evidence": {"ocr_text": o["text"][:100], "max_iou_with_dom": best},
-                        "suggested_cause": "canvas/图片内文字，或 DOM 取自不同页面状态",
-                    })
+                    anomalies.append(S.anomaly(
+                        "text_not_in_dom", ob,
+                        {"ocr_element_id": o.get("id"), "ocr_text": o["text"][:100],
+                         "max_iou_with_dom": best},
+                        0.5,
+                        "canvas/图片内文字，或 DOM 取自不同页面状态"))
 
         # ---------- 3) DOM 元素重叠 ----------
         if dom:
@@ -147,19 +144,19 @@ def main() -> int:
                         continue
                     iou = S.bbox_iou(box_a, box_b)
                     if iou > args.overlap_threshold:
-                        anomalies.append({
-                            "type": "element_overlap",
-                            "bbox": inter,
-                            "confidence": round(min(0.99, iou + 0.5), 2),
-                            "evidence": {"iou": round(iou, 2),
-                                         "a": (a.get("text") or a.get("type"))[:60],
-                                         "b": (b.get("text") or b.get("type"))[:60]},
-                        })
+                        anomalies.append(S.anomaly(
+                            "element_overlap", inter,
+                            {"iou": round(iou, 2),
+                             "a_id": a.get("id"), "b_id": b.get("id"),
+                             "a": (a.get("text") or a.get("type"))[:60],
+                             "b": (b.get("text") or b.get("type"))[:60]},
+                            round(min(0.99, iou + 0.5), 2)))
 
         report = S.envelope(task="crosscheck", sensors=[s for s, p in (("dom", dom), ("ocr", ocr)) if p],
                             coordsys="device_px",
                             source={"type": "fused", "image": args.image, "dpr": dpr})
         report["anomalies"] = anomalies
+        report["notation"] = S.NOTATION_GUIDE
         report["metrics"] = {"anomaly_count": len(anomalies)}
         print(S.dump_json(report))
         return 0

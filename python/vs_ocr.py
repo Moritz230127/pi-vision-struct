@@ -16,16 +16,31 @@
 """
 import argparse
 import json
+import os
 import sys
+from pathlib import Path
+
+import vs_schema as S
 
 from PIL import Image
 
 
-def _ocr_paddle(img_path: str, args) -> list[dict]:
-    """PaddleOCR PP-OCRv6 medium（高召回）。惰性导入，避免拖慢默认路径。"""
-    from paddleocr import PaddleOCR  # type: ignore[import-not-found]
+_PADDLE_ENGINE = None
 
-    engine = PaddleOCR(lang="ch", enable_mkldnn=False)
+
+def get_paddle_engine():
+    """PaddleOCR 引擎进程内单例（ocrserver 驻留时全程只载一次）。"""
+    global _PADDLE_ENGINE
+    if _PADDLE_ENGINE is None:
+        from paddleocr import PaddleOCR  # type: ignore[import-not-found]
+
+        _PADDLE_ENGINE = PaddleOCR(lang="ch", enable_mkldnn=False)
+    return _PADDLE_ENGINE
+
+
+def paddle_predict(img_path: str, min_conf: float = 0.5) -> list[dict]:
+    """PP-OCRv6 medium 高召回推理 → items（与 rapid 路径同构）。"""
+    engine = get_paddle_engine()
     res = engine.predict(img_path)
     first = res[0] if isinstance(res, list) else res
     texts = first.get("rec_texts", []) or []
@@ -34,7 +49,7 @@ def _ocr_paddle(img_path: str, args) -> list[dict]:
     items = []
     for i, txt in enumerate(texts):
         score = float(scores[i]) if i < len(scores) else 0.0
-        if score < args.min_conf:
+        if score < min_conf:
             continue
         if i < len(polys) and polys[i] is not None:
             box = [[round(float(p[0])), round(float(p[1]))] for p in polys[i]]
@@ -51,6 +66,72 @@ def _ocr_paddle(img_path: str, args) -> list[dict]:
     return items
 
 
+def _ocr_paddle(img_path: str, args) -> list[dict]:
+    """CLI 兼容入口。惰性导入，避免拖慢默认路径。"""
+    return paddle_predict(img_path, min_conf=args.min_conf)
+
+
+# ---- paddle 常驻服务客户端（unix socket 行分隔 JSON，与 omniserver 同模式）----
+DAEMON_DIR = f"{os.path.expanduser('~')}/.cache/vs-ocr"
+DAEMON_SOCKET = f"{DAEMON_DIR}/ocrserver.sock"
+
+
+def daemon_health(timeout: float = 1.0) -> bool:
+    import socket
+
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect(DAEMON_SOCKET)
+        s.sendall(b'{"ping": true}\n')
+        line = s.makefile("rb").readline()
+        s.close()
+        return b'"ok"' in line
+    except Exception:
+        return False
+
+
+def daemon_spawn() -> bool:
+    """拉起常驻服务（detached）。等待就绪最多 90s（含模型加载）。"""
+    import subprocess
+    import time
+
+    os.makedirs(DAEMON_DIR, exist_ok=True)
+    log = open(f"{DAEMON_DIR}/daemon.log", "a", encoding="utf-8")
+    cmd = [sys.executable, "-u",
+           f"{Path(__file__).resolve().parent}/ocrserver.py"]
+    try:
+        subprocess.Popen(cmd, stdout=log, stderr=log,
+                         stdin=subprocess.DEVNULL,
+                         start_new_session=True, close_fds=True)
+    except Exception:
+        return False
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        if daemon_health():
+            return True
+        time.sleep(1)
+    return False
+
+
+def daemon_ocr(image: str, min_conf: float) -> list[dict] | None:
+    """经常驻服务推理；任何失败返回 None（调用方回退冷载）。"""
+    import socket
+
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(120.0)
+        s.connect(DAEMON_SOCKET)
+        payload = json.dumps({"image": image, "min_conf": min_conf}) + "\n"
+        s.sendall(payload.encode())
+        with s.makefile("rb") as f:
+            data = json.loads(f.readline().decode())
+        s.close()
+        return data["items"] if data.get("ok") else None
+    except Exception:
+        return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--image", required=True)
@@ -61,6 +142,8 @@ def main() -> int:
     ap.add_argument("--backend", default="rapidocr", choices=["rapidocr", "paddle"])
     ap.add_argument("--preprocess", default="none", choices=["none", "contrast"],
                     help="none=原图; contrast=自动对比度拉伸（低对比度文字用）")
+    ap.add_argument("--daemon", choices=["auto", "always", "never"], default="auto",
+                    help="auto=有服务则用否则拉起；always=必须服务；never=直连冷载")
     args = ap.parse_args()
 
     try:
@@ -84,7 +167,16 @@ def main() -> int:
         im.save(tmp)
 
         if args.backend == "paddle":
-            items = _ocr_paddle(tmp, args)
+            served = None
+            if args.daemon != "never" and os.environ.get("VS_OCR_DAEMON") != "0":
+                if daemon_health() or daemon_spawn():
+                    served = daemon_ocr(tmp, args.min_conf)
+            if served is not None:
+                items = served
+            elif args.daemon == "always":
+                raise RuntimeError("ocrdaemon unavailable (--daemon always)")
+            else:
+                items = paddle_predict(tmp, min_conf=args.min_conf)
         else:
             from rapidocr import RapidOCR  # type: ignore[import-not-found]
 
@@ -114,13 +206,12 @@ def main() -> int:
                 "conf": it["conf"], "color": None, "font": None, "z": None,
                 "source": ["ocr"], "coordsys": "image_px", "center": it["center"], "quad": it["quad"]}
                for i, it in enumerate(items)]
-        print(json.dumps({"schema": "vision-report/v2", "task": "ocr", "sensors": ["ocr"],
+        print(S.dump_json({"schema": "vision-report/v2", "task": "ocr", "sensors": ["ocr"],
                           "coordsys": "image_px",
                           "source": {"type": "image", "path": args.image, "size_px": [w, h],
                                       "backend": args.backend},
                           "elements": els, "anomalies": [], "metrics": {},
-                          "truncated": len(items) >= args.max_items},
-                         ensure_ascii=False))
+                          "truncated": len(items) >= args.max_items}))
         return 0
     except Exception as e:
         print(json.dumps({"error": "vs_ocr failed", "detail": str(e)[:500]}, ensure_ascii=False))

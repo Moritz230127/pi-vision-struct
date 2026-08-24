@@ -9,6 +9,7 @@ DOM 是布局真值：文本、bbox、computed style（颜色/字号/定位/z-in
 """
 import argparse
 import json
+import vs_schema as S
 import re
 import sys
 import urllib.parse
@@ -116,7 +117,7 @@ def main() -> int:
                 "bbox_device_px": [round(v * dpr) for v in bbox_css],
             })
 
-        print(json.dumps({
+        print(S.dump_json({
             "schema": "vision-report/v2",
             "task": "dom",
             "sensors": ["dom"],
@@ -127,7 +128,7 @@ def main() -> int:
             "anomalies": [],
             "metrics": {},
             "truncated": len(elements) >= args.max_elements,
-        }, ensure_ascii=False))
+        }))
         return 0
     except Exception as e:
         print(json.dumps({"error": "vs_dom failed", "detail": str(e)[:500]}, ensure_ascii=False))

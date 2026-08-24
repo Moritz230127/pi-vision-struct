@@ -192,10 +192,22 @@ function on(p: Record<string, string>, k: string, flagName: string): string[] {
 	return p[k] === "true" ? [flagName] : [];
 }
 
+// 超时分级常量（ms）：按操作类型命名，禁止散落魔数
+const T = {
+	fast: 20_000, // 截屏 / 环境自检
+	short: 30_000, // pptx / a11y 轻结构
+	normal: 60_000, // dom / ocr / 融合单步
+	heavy: 120_000, // pdf
+	doc: 300_000, // 整页管线 / 版式模型
+	vlm: 360_000, // critic 多区域 VLM 复核
+	model: 600_000, // omniparser 冷启动
+	modelXL: 900_000, // CLIP 批量聚类
+};
+
 const MEASURE: Record<string, Act> = {
 	capture: {
 		script: "vs_capture.py",
-		timeout: 20000,
+		timeout: T.fast,
 		build: (p) => [
 			...flag(p, "out", "--out"),
 			...flag(p, "region", "--region"),
@@ -203,7 +215,7 @@ const MEASURE: Record<string, Act> = {
 	},
 	pixels: {
 		script: "vs_pix.py",
-		timeout: 30000,
+		timeout: T.short,
 		build: (p) => [
 			...flag(p, "image", "--image"),
 			...list(p, "regions", "--regions"),
@@ -215,7 +227,7 @@ const MEASURE: Record<string, Act> = {
 	},
 	ocr: {
 		script: "vs_ocr.py",
-		timeout: 60000,
+		timeout: T.normal,
 		build: (p) => [
 			...flag(p, "image", "--image"),
 			...flag(p, "region", "--region"),
@@ -224,11 +236,12 @@ const MEASURE: Record<string, Act> = {
 			...flag(p, "min_conf", "--min-conf"),
 			...flag(p, "backend", "--backend"),
 			...flag(p, "preprocess", "--preprocess"),
+			...flag(p, "daemon", "--daemon"),
 		],
 	},
 	wallpaper: {
 		script: "vs_wall.py",
-		timeout: 300000,
+		timeout: T.doc,
 		build: (p) => [
 			...flag(p, "dir", "--dir"),
 			...flag(p, "colors", "--colors"),
@@ -241,7 +254,7 @@ const MEASURE: Record<string, Act> = {
 	semantic: {
 		script: "vs_semantic.py",
 		sandbox: false, // 依赖宿主 Ollama 127.0.0.1（硬编码目标）
-		timeout: 360000,
+		timeout: T.vlm,
 		build: (p) => [
 			...flag(p, "image", "--image"),
 			...on(p, "enable", "--enable"),
@@ -250,7 +263,7 @@ const MEASURE: Record<string, Act> = {
 		],
 	},
 	env: {
-		timeout: 30000,
+		timeout: T.short,
 		inline: [
 			"import json,sys",
 			"mods=['onnxruntime','rapidocr','pptx','playwright','PIL']",
@@ -269,7 +282,7 @@ const STRUCT: Record<string, Act> = {
 	dom: {
 		script: "vs_dom.py",
 		sandbox: false, // 本职加载用户指定 URL，需要网络
-		timeout: 60000,
+		timeout: T.normal,
 		build: (p) => [
 			...flag(p, "url", "--url"),
 			...flag(p, "max_elements", "--max-elements"),
@@ -278,7 +291,7 @@ const STRUCT: Record<string, Act> = {
 	},
 	pptx: {
 		script: "vs_pptx.py",
-		timeout: 30000,
+		timeout: T.short,
 		build: (p) => [
 			...flag(p, "file", "--file"),
 			...flag(p, "max_shapes", "--max-shapes"),
@@ -288,7 +301,7 @@ const STRUCT: Record<string, Act> = {
 	omniparser: {
 		script: "vs_omniparser.py",
 		bin: OMNI_PYTHON,
-		timeout: 600000,
+		timeout: T.model,
 		build: (p) => [
 			...flag(p, "image", "--image"),
 			...flag(p, "max_items", "--max-items"),
@@ -297,7 +310,7 @@ const STRUCT: Record<string, Act> = {
 	},
 	layout: {
 		script: "vs_layout.py",
-		timeout: 300000,
+		timeout: T.doc,
 		build: (p) => [
 			...flag(p, "image", "--image"),
 			...flag(p, "max_items", "--max-items"),
@@ -306,7 +319,7 @@ const STRUCT: Record<string, Act> = {
 	},
 	pdf: {
 		script: "vs_pdf.py",
-		timeout: 120000,
+		timeout: T.heavy,
 		build: (p) => [
 			...flag(p, "file", "--file"),
 			...flag(p, "pages", "--pages"),
@@ -314,12 +327,24 @@ const STRUCT: Record<string, Act> = {
 			...flag(p, "render_dir", "--render-dir"),
 		],
 	},
+	a11y: {
+		script: "vs_a11y.py",
+		bin: "python3", // 需要宿主 python-gobject（AT-SPI）；conda env 无 gi
+		sandbox: false, // 需访问会话 DBus 无障碍总线；脚本本身只读
+		timeout: T.fast,
+		build: (p) => [
+			...on(p, "list", "--list"),
+			...flag(p, "app", "--app"),
+			...flag(p, "max_elements", "--max-elements"),
+			...on(p, "with_text", "--with-text"),
+		],
+	},
 };
 
 const FUSE: Record<string, Act> = {
 	analyze: {
 		script: "vs_analyze.py",
-		timeout: 300000,
+		timeout: T.doc,
 		build: (p) => [
 			...flag(p, "task", "--task"),
 			...flag(p, "input", "--input"),
@@ -330,7 +355,7 @@ const FUSE: Record<string, Act> = {
 	},
 	crosscheck: {
 		script: "vs_crosscheck.py",
-		timeout: 60000,
+		timeout: T.normal,
 		build: (p) => [
 			...flag(p, "image", "--image"),
 			...flag(p, "dom", "--dom"),
@@ -341,7 +366,7 @@ const FUSE: Record<string, Act> = {
 	},
 	audit: {
 		script: "vs_audit.py",
-		timeout: 30000,
+		timeout: T.short,
 		build: (p) => [
 			...flag(p, "report", "--report"),
 			...flag(p, "canvas", "--canvas"),
@@ -350,7 +375,7 @@ const FUSE: Record<string, Act> = {
 	},
 	rules: {
 		script: "vs_rules.py",
-		timeout: 60000,
+		timeout: T.normal,
 		build: (p) => [
 			...flag(p, "report", "--report"),
 			...flag(p, "canvas", "--canvas"),
@@ -361,7 +386,7 @@ const FUSE: Record<string, Act> = {
 	critic: {
 		script: "vs_critic.py",
 		sandbox: false, // 依赖宿主 Ollama 127.0.0.1（硬编码目标）
-		timeout: 900000,
+		timeout: T.modelXL,
 		build: (p) => [
 			...flag(p, "report", "--report"),
 			...flag(p, "image", "--image"),
@@ -543,7 +568,7 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "vs_struct",label: "Structure (dom/pptx/omniparser/layout)",
 		description:
-			"L0 源码结构化 + DL 感知。actions: dom=网页布局无损真值(必填 url，DOM+computed style 比截图更准)；pptx=PPTX 结构(必填 file，pt 坐标/填充 hex/字体)；omniparser=任意截图图标级 UI 元素+语义描述(必填 image，无 DOM 时的替代；CPU 首载 10-20s，单图 30-60s)；layout=文档版式分析 PP-DocLayoutV3(必填 image，标题/正文/图表/表格区域；首次下模型 ~30MB 需代理；与 omniparser 互补：本工具面向文档而非 UI)；pdf=PDF 文本块抽取(必填 file，pt 坐标，可选 pages/render_dir 渲染页面供版式分析)。区分：只要文字/颜色用 vs_measure；本工具提供元素结构与源码层证据，输出可传给 vs_fuse 做审计/规则。",
+			"L0 源码结构化 + DL 感知。actions: dom=网页布局无损真值(必填 url，DOM+computed style 比截图更准)；pptx=PPTX 结构(必填 file，pt 坐标/填充 hex/字体)；omniparser=任意截图图标级 UI 元素+语义描述(必填 image，无 DOM 时的替代；CPU 首载 10-20s，单图 30-60s)；layout=文档版式分析 PP-DocLayoutV3(必填 image，标题/正文/图表/表格区域；首次下模型 ~30MB 需代理；与 omniparser 互补：本工具面向文档而非 UI)；pdf=PDF 文本块抽取(必填 file，pt 坐标，可选 pages/render_dir 渲染页面供版式分析)；a11y=桌面应用无障碍树(原生应用的 L0 真值：角色/名称/屏幕坐标；可选 app 过滤/list 列应用/with_text 抓文本；走系统 python3 需 python-gobject)。区分：只要文字/颜色用 vs_measure；本工具提供元素结构与源码层证据，输出可传给 vs_fuse 做审计/规则。",
 		parameters: Type.Object({
 			action: Type.Union([
 				Type.Literal("dom"),
@@ -551,6 +576,7 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 				Type.Literal("omniparser"),
 				Type.Literal("layout"),
 				Type.Literal("pdf"),
+				Type.Literal("a11y"),
 			]),
 			url: Type.Optional(Type.String({ description: "要分析的 URL（dom）" })),
 			max_elements: Type.Optional(Type.Number({ description: "最多元素（dom，默认 60）" })),
@@ -564,6 +590,8 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 			min_conf: Type.Optional(Type.Number({ description: "最小置信度（layout，默认 0.3）" })),
 			pages: Type.Optional(Type.String({ description: "PDF 页范围 1-3 或 all（pdf）" })),
 			render_dir: Type.Optional(Type.String({ description: "渲染页面输出目录（pdf，可选）" })),
+			app: Type.Optional(Type.String({ description: "应用名过滤（a11y）" })),
+			with_text: Type.Optional(Type.Boolean({ description: "文本类角色额外抓内容（a11y）" })),
 		}),
 		async execute(_id, params) {
 			return dispatch(STRUCT, String(params.action), params);

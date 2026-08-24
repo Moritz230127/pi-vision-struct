@@ -14,6 +14,7 @@
 """
 import argparse
 import json
+import vs_schema as S
 import os
 import sys
 
@@ -62,13 +63,12 @@ def main() -> int:
             if len(els) >= args.max_items:
                 break
 
-        print(json.dumps({"schema": "vision-report/v2", "task": "layout",
+        print(S.dump_json({"schema": "vision-report/v2", "task": "layout",
                           "sensors": ["layout"], "coordsys": "image_px",
                           "source": {"type": "image", "path": args.image,
                                      "size_px": [w, h], "engine": "PP-DocLayoutV3"},
                           "elements": els, "anomalies": [], "metrics": {},
-                          "truncated": len(els) >= args.max_items},
-                         ensure_ascii=False))
+                          "truncated": len(els) >= args.max_items}))
         return 0
     except Exception as e:
         print(json.dumps({"error": "vs_layout failed", "detail": str(e)[:500]}, ensure_ascii=False))

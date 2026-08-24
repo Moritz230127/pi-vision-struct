@@ -38,6 +38,35 @@ def envelope(task: str | None = None, sensors: list[str] | None = None,
     }
 
 
+# ---------------------------------------------------------------- 视觉原语记法（DeepSeek 式坐标锚定推理）
+
+NOTATION_GUIDE = ("primitive notation: in reasoning chains, reference locations as "
+                  "[bbox: x1,y1,x2,y2] or [point: x,y]; never use relative phrases like "
+                  "'the element on the left'. Coordinates follow this report's coordsys.")
+
+
+def bbox_primitive(bbox: Sequence[float]) -> str:
+    """DeepSeek 'Thinking with Visual Primitives' 记法：[bbox: x1,y1,x2,y2]。"""
+    return "[bbox: " + ", ".join(str(round(v)) for v in bbox) + "]"
+
+
+def point_primitive(x: float, y: float) -> str:
+    """DeepSeek 'Thinking with Visual Primitives' 记法：[point: x,y]。"""
+    return f"[point: {round(x)}, {round(y)}]"
+
+
+def anomaly(atype: str, bbox: Sequence[float], evidence: dict[str, Any],
+            confidence: float = 0.5,
+            suggested_cause: str | None = None) -> dict[str, Any]:
+    """统一异常项构造（唯一出口）：type + bbox + primitive 原语记法 + 证据。"""
+    a: dict[str, Any] = {"type": atype, "bbox": list(bbox),
+                         "primitive": bbox_primitive(bbox),
+                         "confidence": confidence, "evidence": evidence}
+    if suggested_cause:
+        a["suggested_cause"] = suggested_cause
+    return a
+
+
 # ---------------------------------------------------------------- 坐标变换
 
 def css_to_device(bbox: Sequence[float], dpr: float, scroll: tuple[int, int] = (0, 0)) -> list[int]:

@@ -8,6 +8,7 @@
 """
 import argparse
 import json
+import vs_schema as S
 import sys
 from io import BytesIO
 
@@ -90,13 +91,13 @@ def main() -> int:
                 shape_dump(shape, 0, shapes)
                 total += 1
             slides_out.append({"slide": idx, "shapes": shapes, "shape_count": len(shapes)})
-        print(json.dumps({
+        print(S.dump_json({
             "schema": "vision-report/v2", "task": "pptx", "sensors": ["pptx"],
             "coordsys": "pt",
             "source": {"type": "pptx", "path": args.file,
                        "slide_size_pt": [(prs.slide_width or 0) / 12700.0, (prs.slide_height or 0) / 12700.0],
                        "total_slides": len(prs.slides)},
-            "slides": slides_out, "truncated": truncated}, ensure_ascii=False))
+            "slides": slides_out, "truncated": truncated}))
         return 0
     except Exception as e:
         print(json.dumps({"error": "vs_pptx failed", "detail": str(e)[:500]}, ensure_ascii=False))

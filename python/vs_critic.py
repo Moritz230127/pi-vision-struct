@@ -20,6 +20,7 @@ import argparse
 import base64
 import io
 import json
+import vs_schema as S
 import os
 import sys
 import tempfile
@@ -98,24 +99,15 @@ def critic_judge(
         desc=crop["finding"].get("suggested_cause", ""),
         evidence=json.dumps(crop["finding"].get("evidence", {}), ensure_ascii=False)[:400],
     )
-    body = {
-        "model": model,
-        "prompt": prompt,
-        "images": [crop["png_b64"]],
-        "stream": False,
-        "options": {"num_ctx": 8192, "num_predict": max_tokens, "temperature": 0.2},
-    }
     t0 = time.time()
     try:
-        req = urllib.request.Request(
-            base_url.rstrip("/") + "/api/generate",
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        text = str(data.get("response", "")).strip()
+        import vs_vlm
+        r = vs_vlm.generate(prompt, crop["png_b64"], model=model,
+                            base_url=base_url, max_tokens=max_tokens, timeout=timeout)
+        if not r["ok"]:
+            return {"ok": False, "verdict": "uncertain", "error": r["error"],
+                    "ms": int((time.time() - t0) * 1000)}
+        text = r["text"]
         parsed = _try_parse_json(text) or {}
         verdict = str(parsed.get("verdict", "uncertain"))
         if verdict not in ("confirmed", "rejected", "uncertain"):
@@ -154,7 +146,7 @@ def main() -> int:
             "enabled": False,
             "reason": "opt-in: 传 --enable 或设 PI_VISION_CRITIC=1（VLM 复核有思考成本）",
         }
-        print(json.dumps(report, ensure_ascii=False))
+        print(S.dump_json(report))
         return 0
 
     crops, image_size, err = prepare_crops(report, args.image, args.max_critic, args.margin)
@@ -185,7 +177,7 @@ def main() -> int:
     report["critic"] = critic_stats
     if crop_dir:
         report["critic"]["crop_dir"] = str(crop_dir)
-    print(json.dumps(report, ensure_ascii=False))
+    print(S.dump_json(report))
     return 0
 
 

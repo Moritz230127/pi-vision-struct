@@ -88,12 +88,11 @@ def main() -> int:
                     continue
                 iou = S.bbox_iou(box_a, box_b)
                 if iou > args.overlap_threshold:
-                    anomalies.append({
-                        "type": "element_overlap", "bbox": inter,
-                        "confidence": round(min(0.99, iou + 0.5), 2),
-                        "evidence": {"iou": round(iou, 2), "area": round(ia),
-                                     "a": label(a, f"el{i}"), "b": label(b, f"el{j}")},
-                    })
+                    anomalies.append(S.anomaly(
+                        "element_overlap", inter,
+                        {"iou": round(iou, 2), "area": round(ia),
+                         "a": label(a, f"el{i}"), "b": label(b, f"el{j}")},
+                        round(min(0.99, iou + 0.5), 2)))
 
         # 2) 出界
         if canvas:
@@ -101,11 +100,9 @@ def main() -> int:
             for el in els:
                 x1, y1, x2, y2 = el["bbox"]
                 if x1 < -1 or y1 < -1 or x2 > cw + 1 or y2 > ch + 1:
-                    anomalies.append({
-                        "type": "off_canvas", "bbox": el["bbox"],
-                        "confidence": 0.95,
-                        "evidence": {"canvas": [cw, ch], "name": label(el, "?")},
-                    })
+                    anomalies.append(S.anomaly(
+                        "off_canvas", el["bbox"],
+                        {"canvas": [cw, ch], "name": label(el, "?")}, 0.95))
 
         # 3) 对比度
         for el in els:
@@ -118,18 +115,17 @@ def main() -> int:
             except ValueError:
                 continue
             if ratio < 4.5:
-                anomalies.append({
-                    "type": "contrast_fail", "bbox": el["bbox"],
-                    "confidence": 1.0,
-                    "evidence": {"fg": fg, "bg": fill, "ratio": round(ratio, 2), "required_aa": 4.5,
-                                 "name": label(el, "?")},
-                })
+                anomalies.append(S.anomaly(
+                    "contrast_fail", el["bbox"],
+                    {"fg": fg, "bg": fill, "ratio": round(ratio, 2), "required_aa": 4.5,
+                     "name": label(el, "?")}, 1.0))
 
         report_out = S.envelope(task="audit",
                                 sensors=report.get("sensors") or ["audit"],
                                 coordsys=report.get("coordsys"),
                                 source={"type": "fused", "from": args.report})
         report_out["anomalies"] = anomalies
+        report_out["notation"] = S.NOTATION_GUIDE
         report_out["metrics"] = {"element_count": len(els), "anomaly_count": len(anomalies)}
         print(S.dump_json(report_out))
         return 0
