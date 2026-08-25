@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0 — 2026-08-25（单端口架构：4 工具 → 1 个 `vs`）
+
+### 架构（系统工程优化）
+
+- vs_measure/vs_struct/vs_fuse/vs_cluster 四工具合并为单一 `vs` 工具（18 action 枚举分发，
+  内部 ROUTE 路由表复用原三张分发表 + cluster 收编为标准 Act）；行为零变更
+- 上下文注入实测 1359 → 704 tokens（-48%）
+- 描述语言统一为中文紧凑风格；主描述压缩为路由指南（细节在 SKILL.md）
+- 语言决策记录：否决 Rust/Go 重写（热点在原生后端，子进程模型下宿主语言性能无关），防重复讨论
+
+### 发布工程
+
+- vs_setup.py --check 新增 a11y 能力探测（at-spi2-core/python-gobject；缺失仅警告并给出发行版安装提示，不阻塞）
+- README 追加 v0.3.0 章节（只增不改，保护未提交的用户改动）
+- SKILL.md 重写为单端口用法（决策表/action 参考/示例全部对齐）
+
 ## 0.2.2 — 2026-08-25（自稳定 P0：preflight 层 + git 完整性）
 
 ### 调用前预检（self-stabilization core）

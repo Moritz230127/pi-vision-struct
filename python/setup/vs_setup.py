@@ -149,6 +149,25 @@ def check_env(py: Path, mod: str) -> bool:
     return r.returncode == 0
 
 
+def check_a11y() -> dict:
+    """a11y 传感器能力探测：系统 python3 需 python-gobject + at-spi2-core。
+    缺失仅警告不阻塞 —— a11y 是可选传感器，其余功能不受影响。"""
+    if IS_WIN:
+        return {"available": False, "hint": "windows 暂未实现（experimental）"}
+    try:
+        r = subprocess.run(
+            [shutil.which("python3") or "python3", "-c",
+             "import gi; gi.require_version('Atspi', '2.0')"],
+            capture_output=True, text=True, timeout=20)
+        ok = r.returncode == 0
+        hint = "" if ok else ("Arch: sudo pacman -S at-spi2-core python-gobject"
+                              if shutil.which("pacman") else
+                              "Debian/Ubuntu: sudo apt install libatspi2.0-0 python3-gi")
+        return {"available": ok, **({"hint": hint} if hint else {})}
+    except Exception as e:
+        return {"available": False, "hint": str(e)[:120]}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
@@ -210,6 +229,7 @@ def main() -> int:
             "sandbox": {"bwrap": bwrap_ok},
             "ollama": {"qwen3_vl": ollama_ok},
             "daemon": {"socket": daemon_sock},
+            "a11y": check_a11y(),
             "steps": [{"name": "health_check", "status": "ok",
                         "detail": f"core={'完整' if core_ok else '缺失'} omni={'完整' if omni_ok else '缺失'}"}],
         }

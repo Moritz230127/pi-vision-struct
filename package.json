@@ -1,6 +1,6 @@
 {
   "name": "pi-vision-struct",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Layered lossless vision for text-only models (DeepSeek etc.): L0 source (DOM/PPTX) + L1 deterministic measurement (color/OCR/diff/WCAG with exact numbers) + L2 opt-in semantics (local qwen3-vl) + deterministic fusion (crosscheck/audit/rules) + OmniParser icon structuring + CLIP clustering. All local, read-only, schema-driven (vision-report/v2).",
   "keywords": [
     "pi-package",

@@ -622,144 +622,82 @@ pi.registerCommand("vs", {
 		},
 	});
 
-	pi.registerTool({
-		name: "vs_measure",
-		label: "Vision Measure (capture/pixels/ocr/wallpaper/semantic/env)",
-		description:
-			"像素级测量与感知传感器（本地，无网络）。用于一切需要从图片取数值/坐标/文字的任务——模型不能直接看图，任何视觉推理必须先经此工具获取结构化数据。actions: capture=Wayland 截屏(必填 out)；pixels=主色直方图/区域取色/diff 异常定位/WCAG 对比度(必填 image)；ocr=文字+精确 4 点 bbox(必填 image，小字加 upscale)；wallpaper=壁纸批量程序化分类(必填 dir)；semantic=L2 语义标签(opt-in enable)；env=环境自检。区分：整页多传感器融合用 vs_fuse analyze；图标级 UI 元素用 vs_struct omniparser；本工具是单图测量/文字/颜色。",
-		parameters: Type.Object({
-			action: Type.Union([
-				Type.Literal("capture"),
-				Type.Literal("pixels"),
-				Type.Literal("ocr"),
-				Type.Literal("wallpaper"),
-				Type.Literal("semantic"),
-				Type.Literal("env"),
-			]),
-			image: Type.Optional(Type.String({ description: "图片路径" })),
-			out: Type.Optional(Type.String({ description: "截屏输出 PNG 路径（capture）" })),
-			region: Type.Optional(Type.String({ description: "区域 x1,y1,x2,y2（capture/ocr）" })),
-			compare: Type.Optional(Type.String({ description: "diff 对比图路径（pixels）" })),
-			colors: Type.Optional(Type.Number({ description: "主色数量（pixels/wallpaper）" })),
-			wcag: Type.Optional(Type.String({ description: "对比度对 前景hex,背景hex（pixels，逗号分隔多对）" })),
-			threshold: Type.Optional(Type.Number({ description: "diff 阈值（pixels，默认 30）" })),
-			dir: Type.Optional(Type.String({ description: "壁纸目录（wallpaper）" })),
-			max_files: Type.Optional(Type.Number({ description: "最多处理（wallpaper）" })),
-			ext: Type.Optional(Type.String({ description: "扩展名列表（wallpaper，逗号分隔）" })),
-			semantic: Type.Optional(Type.Boolean({ description: "opt-in 语义标签（wallpaper）" })),
-			semantic_max: Type.Optional(Type.Number({ description: "语义标注上限（wallpaper）" })),
-			upscale: Type.Optional(Type.Number({ description: "OCR 放大倍数（默认 2）" })),
-			max_items: Type.Optional(Type.Number({ description: "OCR 最多条数（默认 100）" })),
-			min_conf: Type.Optional(Type.Number({ description: "OCR 最低置信度（默认 0.5）" })),
-			backend: Type.Optional(
-				Type.String({
-					description:
-						"OCR 后端：rapidocr（默认，快 ~2-5s，召回中）/ paddle（PP-OCRv6 medium，高召回但慢 ~7-40s）",
-				}),
-			),
-			preprocess: Type.Optional(
-				Type.String({
-					description:
-						"预处理：none（默认）/ contrast（自动对比度拉伸，低对比度文字用）",
-				}),
-			),
-			enable: Type.Optional(Type.Boolean({ description: "opt-in 开启 L2 语义（semantic）" })),
-			prompt: Type.Optional(Type.String({ description: "语义提示词（semantic，可选）" })),
-			max_tokens: Type.Optional(Type.Number({ description: "语义最大 token（semantic）" })),
-		}),
-		async execute(_id, params) {
-			return dispatch(MEASURE, String(params.action), params);
-		},
-	});
+	// ---- 单端口：全部视觉能力收敛为一个 `vs` 工具（18 动作），最小化上下文注入 ----
+	const ROUTE: Record<string, Act> = {};
+	for (const table of [MEASURE, STRUCT, FUSE])
+		for (const [k, v] of Object.entries(table)) ROUTE[k] = v;
+	ROUTE.cluster = {
+		script: "vs_cluster.py",
+		bin: OMNI_PYTHON,
+		timeout: T.modelXL,
+		build: (p) => [
+			...flag(p, "dir", "--dir"),
+			...flag(p, "files", "--files"),
+			...flag(p, "threshold", "--threshold"),
+			...flag(p, "max_files", "--max-files"),
+		],
+	};
 
 	pi.registerTool({
-		name: "vs_struct",label: "Structure (dom/pptx/omniparser/layout)",
+		name: "vs",
+		label: "Vision Suite 视觉套件（单端口 18 动作）",
 		description:
-			"L0 源码结构化 + DL 感知。actions: dom=网页布局无损真值(必填 url，DOM+computed style 比截图更准)；pptx=PPTX 结构(必填 file，pt 坐标/填充 hex/字体)；omniparser=任意截图图标级 UI 元素+语义描述(必填 image，无 DOM 时的替代；CPU 首载 10-20s，单图 30-60s)；layout=文档版式分析 PP-DocLayoutV3(必填 image，标题/正文/图表/表格区域；首次下模型 ~30MB 需代理；与 omniparser 互补：本工具面向文档而非 UI)；pdf=PDF 文本块抽取(必填 file，pt 坐标，可选 pages/render_dir 渲染页面供版式分析)；a11y=桌面应用无障碍树(原生应用的 L0 真值：角色/名称/屏幕坐标；可选 app 过滤/list 列应用/with_text 抓文本；走系统 python3 需 python-gobject)。区分：只要文字/颜色用 vs_measure；本工具提供元素结构与源码层证据，输出可传给 vs_fuse 做审计/规则。",
+			"视觉套件单端口18动作。测量：capture截图(out)/pixels取色diff WCAG(image)/ocr文字坐标(image)/wallpaper分类(dir)/semantic语义(image,enable)/env自检。结构：dom网页(url)/pptx(file)/omniparser图标级(image)/layout版式(image)/pdf(file)/a11y无障碍树(app,list)。融合：analyze整页(task,input)/crosscheck互验(image,dom,ocr)/audit审计(report)/rules准则(report)/critic复核(report,image,enable)。cluster聚类(dir或files)。先capture后分析；audit/rules/critic需先有报告JSON；数字以输出JSON为准。",
 		parameters: Type.Object({
 			action: Type.Union([
-				Type.Literal("dom"),
-				Type.Literal("pptx"),
-				Type.Literal("omniparser"),
-				Type.Literal("layout"),
-				Type.Literal("pdf"),
-				Type.Literal("a11y"),
+				Type.Literal("capture"), Type.Literal("pixels"), Type.Literal("ocr"),
+				Type.Literal("wallpaper"), Type.Literal("semantic"), Type.Literal("env"),
+				Type.Literal("dom"), Type.Literal("pptx"), Type.Literal("omniparser"),
+				Type.Literal("layout"), Type.Literal("pdf"), Type.Literal("a11y"),
+				Type.Literal("analyze"), Type.Literal("crosscheck"), Type.Literal("audit"),
+				Type.Literal("rules"), Type.Literal("critic"), Type.Literal("cluster"),
 			]),
-			url: Type.Optional(Type.String({ description: "要分析的 URL（dom）" })),
-			max_elements: Type.Optional(Type.Number({ description: "最多元素（dom，默认 60）" })),
-			screenshot: Type.Optional(Type.String({ description: "DOM 会话截图输出路径（dom）" })),
-			file: Type.Optional(Type.String({ description: "pptx 文件路径（pptx）" })),
-			max_shapes: Type.Optional(Type.Number({ description: "最多形状（pptx，默认 200）" })),
-			slide: Type.Optional(Type.Number({ description: "只导出第 N 张（pptx）" })),
-			image: Type.Optional(Type.String({ description: "图片路径（omniparser/layout）" })),
-			max_items: Type.Optional(Type.Number({ description: "最多元素（omniparser/layout，默认 60）" })),
+			out: Type.Optional(Type.String({ description: "截屏输出路径（capture）" })),
+			image: Type.Optional(Type.String({ description: "图片路径（pixels/ocr等多数动作）" })),
+			region: Type.Optional(Type.String({ description: "区域 x1,y1,x2,y2（capture/ocr/pixels）" })),
+			colors: Type.Optional(Type.Number({ description: "主色数（pixels/wallpaper）" })),
+			compare: Type.Optional(Type.String({ description: "对比图（pixels diff）" })),
+			wcag: Type.Optional(Type.String({ description: "前景hex,背景hex…（pixels WCAG）" })),
+			threshold: Type.Optional(Type.Number({ description: "diff阈值30/聚类0.75" })),
+			dir: Type.Optional(Type.String({ description: "图片目录（wallpaper/cluster）" })),
+			ext: Type.Optional(Type.String({ description: "扩展名列表（wallpaper）" })),
+			max_files: Type.Optional(Type.Number({ description: "最多文件（wallpaper/cluster，默认200）" })),
+			prompt: Type.Optional(Type.String({ description: "自定义语义提示词（semantic）" })),
+			enable: Type.Optional(Type.Boolean({ description: "开启 L2/VLM（semantic/critic/wallpaper语义）" })),
+			upscale: Type.Optional(Type.Number({ description: "OCR 放大倍数（默认2）" })),
+			max_items: Type.Optional(Type.Number({ description: "最多条目（ocr/omniparser/layout/pdf）" })),
+			min_conf: Type.Optional(Type.Number({ description: "最低置信度（ocr/layout）" })),
+			backend: Type.Optional(Type.String({ description: "OCR 后端 rapidocr|paddle（ocr）" })),
+			preprocess: Type.Optional(Type.String({ description: "none|contrast（ocr）" })),
+			daemon: Type.Optional(Type.String({ description: "auto|always|never（ocr paddle 常驻）" })),
+			url: Type.Optional(Type.String({ description: "URL（dom；analyze 可选）" })),
+			max_elements: Type.Optional(Type.Number({ description: "最多元素（dom/a11y，默认60/80）" })),
+			screenshot: Type.Optional(Type.String({ description: "DOM 会话截图输出（dom）" })),
+			file: Type.Optional(Type.String({ description: "pptx/pdf 文件路径" })),
+			max_shapes: Type.Optional(Type.Number({ description: "最多形状（pptx，默认200）" })),
+			slide: Type.Optional(Type.Number({ description: "仅导出第 N 张（pptx）" })),
 			no_ocr: Type.Optional(Type.Boolean({ description: "跳过 OCR 仅图标（omniparser）" })),
-			min_conf: Type.Optional(Type.Number({ description: "最小置信度（layout，默认 0.3）" })),
-			pages: Type.Optional(Type.String({ description: "PDF 页范围 1-3 或 all（pdf）" })),
-			render_dir: Type.Optional(Type.String({ description: "渲染页面输出目录（pdf，可选）" })),
+			pages: Type.Optional(Type.String({ description: "PDF 页范围 1-3/all（pdf）" })),
+			render_dir: Type.Optional(Type.String({ description: "渲染输出目录（pdf）" })),
 			app: Type.Optional(Type.String({ description: "应用名过滤（a11y）" })),
-			with_text: Type.Optional(Type.Boolean({ description: "文本类角色额外抓内容（a11y）" })),
-		}),
-		async execute(_id, params) {
-			return dispatch(STRUCT, String(params.action), params);
-		},
-	});
-
-	pi.registerTool({
-		name: "vs_fuse",label: "Fusion & Rules (analyze/crosscheck/audit/rules/critic)",
-		description:
-			"确定性融合/审计/准则/复核（本地）。把多个测量/结构报告合并判定，或对已有报告做规则审计。actions: analyze=配置驱动整页管线(必填 task；diagnose-screenshot 是整页分析首选)；crosscheck=DOM↔OCR↔像素三方互验(必填 image，可选 dom/ocr 报告)；audit=重叠/出界/对比度审计(必填 report)；rules=设计准则引擎(必填 report；R1对比度/R2重叠/R3对齐/R4间距/R5安全区，仅评估设计元素)；critic=VLM 复核裁剪区(必填 report+image，opt-in enable；出界/安全区等全局属性缺陷在裁剪视图会误判)。注意：audit/rules/critic 需先把前置工具输出存为报告 JSON 文件再传入。",
-		parameters: Type.Object({
-			action: Type.Union([
-				Type.Literal("analyze"),
-				Type.Literal("crosscheck"),
-				Type.Literal("audit"),
-				Type.Literal("rules"),
-				Type.Literal("critic"),
-			]),
+			list: Type.Optional(Type.Boolean({ description: "仅列应用（a11y）" })),
+			with_text: Type.Optional(Type.Boolean({ description: "抓文本内容（a11y）" })),
 			task: Type.Optional(Type.String({ description: "任务名（analyze）" })),
-			compare: Type.Optional(Type.String({ description: "对比图路径（analyze diff-screenshots 任务）" })),
 			input: Type.Optional(Type.String({ description: "输入 图片/pptx/目录（analyze）" })),
-			url: Type.Optional(Type.String({ description: "URL（analyze 的 DOM 源）" })),
-			dpr: Type.Optional(Type.Number({ description: "DPR（默认 1.0）" })),
-			image: Type.Optional(Type.String({ description: "图片路径（crosscheck/critic）" })),
-			dom: Type.Optional(Type.String({ description: "dom_dump 输出 JSON（crosscheck）" })),
-			ocr: Type.Optional(Type.String({ description: "ocr 输出 JSON（crosscheck）" })),
-			color_threshold: Type.Optional(Type.Number({ description: "ΔE 阈值（crosscheck，默认 5）" })),
-			report: Type.Optional(Type.String({ description: "报告 JSON 路径（audit/rules/critic）" })),
+			dpr: Type.Optional(Type.Number({ description: "DPR（默认1.0）" })),
+			dom: Type.Optional(Type.String({ description: "dom 报告 JSON（crosscheck）" })),
+			ocr: Type.Optional(Type.String({ description: "ocr 报告 JSON（crosscheck）" })),
+			color_threshold: Type.Optional(Type.Number({ description: "ΔE 阈值（crosscheck，默认5）" })),
+			report: Type.Optional(Type.String({ description: "报告 JSON（audit/rules/critic）" })),
 			canvas: Type.Optional(Type.String({ description: "画布 WxH（audit/rules）" })),
-			overlap_threshold: Type.Optional(Type.Number({ description: "IoU 阈值（audit，默认 0.05）" })),
-			align_tol: Type.Optional(Type.Number({ description: "对齐容差 px（rules，默认 4）" })),
-			margin: Type.Optional(Type.Number({ description: "安全区/裁剪边距 px（rules/critic）" })),
-			enable: Type.Optional(Type.Boolean({ description: "opt-in 开启 VLM 复核（critic）" })),
-			max_critic: Type.Optional(Type.Number({ description: "裁剪上限（critic，默认 8）" })),
+			overlap_threshold: Type.Optional(Type.Number({ description: "IoU 阈值（audit，默认0.05）" })),
+			align_tol: Type.Optional(Type.Number({ description: "对齐容差 px（rules，默认4）" })),
+			margin: Type.Optional(Type.Number({ description: "边距 px（rules/critic）" })),
+			max_critic: Type.Optional(Type.Number({ description: "裁剪上限（critic，默认8）" })),
+			files: Type.Optional(Type.String({ description: "逗号分隔文件列表，与dir二选一（cluster）" })),
 		}),
 		async execute(_id, params) {
-			return dispatch(FUSE, String(params.action), params);
-		},
-	});
-
-	pi.registerTool({
-		name: "vs_cluster",label: "CLIP Similarity Clustering",
-		description:
-			"CLIP (ViT-B-32, CPU, offline) 相似图聚类：感知相似度矩阵 + 阈值贪心分组（确定性，同输入同输出）。传 dir 或 files(逗号分隔)，可选 threshold(默认 0.75，越大分组越细)/max_files(默认 200)。输出 clusters[]（代表图+成员相似度）+ top_pairs[]。首次运行下载模型 ~350MB（需代理，之后离线）。运行于 omniparser env。用于图片集合的相似分组（壁纸/截图/照片），单张分析不要用它。",
-		parameters: Type.Object({
-			dir: Type.Optional(Type.String({ description: "图片目录" })),
-			files: Type.Optional(Type.String({ description: "逗号分隔文件列表（与 dir 二选一）" })),
-			threshold: Type.Optional(Type.Number({ description: "余弦相似度阈值（默认 0.75）" })),
-			max_files: Type.Optional(Type.Number({ description: "最多处理（默认 200）" })),
-		}),
-		async execute(_id, params) {
-			const p = Object.fromEntries(
-				Object.entries(params).map(([k, v]) => [k, String(v)]),
-			);
-			const args = [PY("vs_cluster.py")];
-			if (p.dir) args.push("--dir", p.dir);
-			if (p.files) args.push("--files", p.files);
-			if (p.threshold) args.push("--threshold", p.threshold);
-			if (p.max_files) args.push("--max-files", p.max_files);
-			const out = await runPython(OMNI_PYTHON, args, 600000);
-			return { content: [{ type: "text", text: out }], details: {} };
+			return dispatch(ROUTE, String(params.action), params);
 		},
 	});
 }
