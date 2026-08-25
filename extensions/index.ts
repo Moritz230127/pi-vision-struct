@@ -122,13 +122,85 @@ function logFailure(tool: string, args: string[], detail: string): void {
 	}
 }
 
+// ---- 自稳定 P0：调用前预检（preflight）----
+// L1 解释器可执行 → L2 核心依赖（vs_schema）可导入。
+// 缓存策略：ok 进程内终身；fail 保留 30s 后允许重试（瞬态故障可自愈重试）。
+// 豁免：inline/-c 健康检查与 /vs setup|check 诊断路径 —— 保证自诊断永不被自诊断阻断。
+const PREFLIGHT_FAIL_TTL = 30_000;
+const preflightCache = new Map<
+	string,
+	{ ok: boolean; detail?: string; at: number }
+>();
+
+function execFileNative(
+	bin: string,
+	args: string[],
+	timeoutMs: number,
+	cwd?: string,
+): Promise<void> {
+	return new Promise((resolve, reject) => {
+		execFile(bin, args, { timeout: timeoutMs, cwd }, (err) =>
+			err ? reject(err) : resolve(),
+		);
+	});
+}
+
+async function preflight(
+	bin: string,
+	pythonDir: string,
+): Promise<{ ok: boolean; detail?: string }> {
+	const cached = preflightCache.get(bin);
+	if (cached) {
+		if (cached.ok) return { ok: true };
+		if (Date.now() - cached.at < PREFLIGHT_FAIL_TTL)
+			return { ok: false, detail: cached.detail };
+	}
+	try {
+		await execFileNative(bin, ["--version"], 10_000);
+	} catch (e) {
+		const r = {
+			ok: false as const,
+			detail: `解释器不可用: ${bin} (${String((e as Error).message).slice(0, 120)})。修复: /vs setup 或检查 PI_VISION_PYTHON/PATH`,
+		};
+		preflightCache.set(bin, { ...r, at: Date.now() });
+		return r;
+	}
+	try {
+		await execFileNative(bin, ["-c", "import vs_schema"], 15_000, pythonDir);
+	} catch {
+		const r = {
+			ok: false as const,
+			detail: `核心依赖导入失败 (import vs_schema @ ${pythonDir})。修复: /vs setup`,
+		};
+		preflightCache.set(bin, { ...r, at: Date.now() });
+		return r;
+	}
+	preflightCache.set(bin, { ok: true, at: Date.now() });
+	return { ok: true };
+}
+
 function runPython(
 	pythonBin: string,
 	args: string[],
 	timeoutMs: number,
 	sandbox = true,
 ): Promise<string> {
-	return new Promise((resolve) => {
+	return (async () => {
+		// inline (-c) 为健康/环境自检路径；vs_setup.py 为诊断/修复自身，均豁免预检 ——
+		// 保证自诊断永不被自诊断阻断
+		const isSelfDiag = args.some((a) => String(a).includes("vs_setup.py"));
+		if (args[0] !== "-c" && !isSelfDiag) {
+			const pf = await preflight(pythonBin, `${PKG_ROOT}python`);
+			if (!pf.ok) {
+				logFailure("preflight", args.slice(0, 4), pf.detail ?? "failed");
+				return JSON.stringify({
+					error: "preflight failed",
+					code: "PREFLIGHT",
+					detail: pf.detail,
+				});
+			}
+		}
+		return await new Promise<string>((resolve) => {
 		// 沙箱: bwrap 内核隔离（--unshare-net 零网络、--ro-bind / 只读根）。
 		// 豁免（sandbox=false）: dom（本职加载用户 URL）/ critic / semantic
 		// （依赖宿主 Ollama 的 127.0.0.1，硬编码无用户可控目标，已审计）。
@@ -157,10 +229,11 @@ function runPython(
 						logFailure(tool, args, out.slice(0, 300));
 					}
 					resolve(out);
-				}
-			},
-		);
-	});
+					}
+				},
+			);
+			});
+		})();
 }
 
 interface Act {
@@ -438,7 +511,40 @@ async function dispatch(
 export default function visionStructExtension(pi: ExtensionAPI) {
 	const pythonBin = process.env.PI_VISION_PYTHON || DEFAULT_PYTHON;
 
-	pi.registerCommand("vs", {
+	async function gitIntegrity(): Promise<string> {
+	try {
+		const desc = await new Promise<string>((res) =>
+			execFile(
+				"git",
+				["--no-pager", "describe", "--tags", "--always", "--dirty"],
+				{ timeout: 5000, cwd: PKG_ROOT },
+				(e, o) => (e ? res("?") : res(String(o).trim())),
+			),
+		);
+		const dirty = await new Promise<number>((res) =>
+			execFile(
+				"git",
+				["status", "--porcelain"],
+				{ timeout: 5000, cwd: PKG_ROOT },
+				(e, o) => {
+					if (e) return res(-1);
+					res(
+						String(o)
+							.split("\n")
+							.filter((l) => l.trim() && !l.includes(".bak")).length,
+						);
+				},
+			),
+		);
+		const state =
+			dirty < 0 ? "状态未知" : dirty === 0 ? "工作树干净" : `${dirty} 处未提交改动`;
+		return `git: ${desc} (${state})`;
+	} catch {
+		return "git: 不可用";
+	}
+}
+
+pi.registerCommand("vs", {
 		description:
 			"pi-vision-struct: 状态自检 / 引导安装。用法: /vs 或 /vs check（只读自检）、/vs setup（核心安装+自测）、/vs setup --with-omniparser（含 OmniParser env）、/vs setup --with-dom（含 playwright firefox）",
 		handler: async (args, ctx) => {
@@ -505,8 +611,9 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 						return `${k}: ${state}`;
 					})
 					.join(" | ");
+				const gitLine = await gitIntegrity();
 				ctx.ui.notify(
-					`pi-vision-struct 环境自检\n${line}\n用法: /vs setup 安装`,
+					`pi-vision-struct 环境自检\n${line}\n${gitLine}\n用法: /vs setup 安装`,
 					"info",
 				);
 			} catch {

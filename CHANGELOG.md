@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.2 — 2026-08-25（自稳定 P0：preflight 层 + git 完整性）
+
+### 调用前预检（self-stabilization core）
+
+- index.ts 新增 preflight 层：L1 解释器可执行（--version）→ L2 核心依赖可导入（import vs_schema）
+- 缓存策略：ok 进程内终身；fail 保留 30s 后允许重试（瞬态故障可自愈重试）
+- 失败时返回结构化 `PREFLIGHT` 错误 + 可操作修复指引，不再让坏环境产生难懂的下游堆栈
+- 自诊断豁免：inline (-c) 健康检查与 vs_setup.py（/vs setup|check）永不被预检阻断 —— 保证自诊断永不被自诊断阻断
+- 预检探针级验证：好环境 L1/L2 双通过；坏解释器故障注入正确拒绝（ENOENT）
+
+### /vs check 增强
+
+- 新增 git 完整性段：当前 tag/commit（describe --tags --dirty）+ 未提交改动计数（排除 .bak）
+- 商业封装门禁的一部分：工作树偏离已知 tag 时用户可见
+
+### 配套自愈能力（已有，本轮验证确认）
+
+- ocrserver 崩溃/重启后的残留 socket 自动清理；vs_ocr --daemon auto 自动重新拉起（实测通过）
+
 ## 0.2.1 — 2026-08-24（坐标原语记法 + a11y 传感器 + 证据锚定）
 
 ### 坐标原语记法（DeepSeek Thinking-with-Visual-Primitives 式）
