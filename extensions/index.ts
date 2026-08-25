@@ -312,6 +312,17 @@ const MEASURE: Record<string, Act> = {
 			...flag(p, "daemon", "--daemon"),
 		],
 	},
+	chart: {
+		script: "vs_chart.py",
+		sandbox: false, // 依赖宿主 Ollama 127.0.0.1
+		timeout: T.vlm,
+		build: (p) => [
+			...flag(p, "image", "--image"),
+			...flag(p, "region", "--region"),
+			...flag(p, "prompt", "--prompt"),
+			...on(p, "enable", "--enable"),
+		],
+	},
 	wallpaper: {
 		script: "vs_wall.py",
 		timeout: T.doc,
@@ -398,6 +409,17 @@ const STRUCT: Record<string, Act> = {
 			...flag(p, "pages", "--pages"),
 			...flag(p, "max_items", "--max-items"),
 			...flag(p, "render_dir", "--render-dir"),
+		],
+	},
+	detect: {
+		script: "vs_detect.py",
+		bin: OMNI_PYTHON,
+		timeout: T.doc,
+		build: (p) => [
+			...flag(p, "image", "--image"),
+			...flag(p, "classes", "--classes"),
+			...flag(p, "threshold", "--threshold"),
+			...flag(p, "max_items", "--max-items"),
 		],
 	},
 	a11y: {
@@ -651,6 +673,7 @@ pi.registerCommand("vs", {
 				Type.Literal("layout"), Type.Literal("pdf"), Type.Literal("a11y"),
 				Type.Literal("analyze"), Type.Literal("crosscheck"), Type.Literal("audit"),
 				Type.Literal("rules"), Type.Literal("critic"), Type.Literal("cluster"),
+				Type.Literal("detect"), Type.Literal("chart"),
 			]),
 			out: Type.Optional(Type.String({ description: "截屏输出路径（capture）" })),
 			image: Type.Optional(Type.String({ description: "图片路径（pixels/ocr等多数动作）" })),
@@ -695,6 +718,7 @@ pi.registerCommand("vs", {
 			margin: Type.Optional(Type.Number({ description: "边距 px（rules/critic）" })),
 			max_critic: Type.Optional(Type.Number({ description: "裁剪上限（critic，默认8）" })),
 			files: Type.Optional(Type.String({ description: "逗号分隔文件列表，与dir二选一（cluster）" })),
+			classes: Type.Optional(Type.String({ description: "逗号分隔类别（detect 开放词表）" })),
 		}),
 		async execute(_id, params) {
 			return dispatch(ROUTE, String(params.action), params);

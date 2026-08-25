@@ -58,7 +58,7 @@ def _try_parse_json(text: str) -> dict | None:
 def classify(
     image_path: str,
     prompt: str | None = None,
-    model: str = "qwen3-vl:8b",
+    model: str | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     timeout: int = DEFAULT_TIMEOUT,
     num_ctx: int = 8192,
@@ -84,7 +84,7 @@ def main() -> int:
     ap.add_argument("--image", required=True)
     ap.add_argument("--prompt")
     ap.add_argument("--enable", action="store_true", help="显式开启 L2 语义（默认 opt-in 关闭）")
-    ap.add_argument("--model", default="qwen3-vl:8b")
+    ap.add_argument("--model", default=None, help="默认取 config l2_model")
     ap.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     args = ap.parse_args()

@@ -13,12 +13,31 @@ DEFAULT_BASE_URL = "http://localhost:11434"
 DEFAULT_MODEL = "qwen3-vl:8b"
 
 
+def default_model() -> str:
+    """L2 模型解析顺序：config `l2_model` > 内置默认。U1：换档只改配置。"""
+    import json
+    import os
+
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    if os.name == "nt":
+        base = os.environ.get("APPDATA", base)
+    try:
+        with open(os.path.join(base, "pi-vision-struct.json"), encoding="utf-8") as f:
+            m = json.load(f).get("l2_model")
+        if isinstance(m, str) and m.strip():
+            return m.strip()
+    except Exception:
+        pass
+    return DEFAULT_MODEL
+
+
 def generate(prompt: str, image_b64: str | None = None, *,
-             model: str = DEFAULT_MODEL,
+             model: str | None = None,
              base_url: str = DEFAULT_BASE_URL,
              num_ctx: int = 8192, max_tokens: int = 512,
              temperature: float = 0.2, timeout: int = 120) -> dict:
-    """单次生成。成功返回 {ok,text,eval_count,done_reason}；失败 {ok:False,error}。"""
+    """单次生成。成功返回 {ok,text,model,eval_count,done_reason}；失败 {ok:False,error}。"""
+    model = model or default_model()
     try:
         body: dict = {"model": model, "prompt": prompt, "stream": False,
                       "options": {"num_ctx": num_ctx, "num_predict": max_tokens,

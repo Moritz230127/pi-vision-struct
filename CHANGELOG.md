@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.4.0 — 2026-08-25（能力补全：U1 L2可配置 + U2 detect + U3 chart + P3 发布验证）
+
+### U2 · 自然图像检测传感器 vs_detect.py
+
+- OWLv2 zero-shot（google/owlv2-base-patch16-ensemble，omniparser env）：任意文本类别 → bbox+conf
+- 选型实录：ultralytics YOLO-World 8.4.x/8.3.x 实测 set_classes 嵌入异常
+  （开放词分数≈0.01 噪声，bus.jpg wheel 仅 0.01；OWLv2 同图 wheel 0.358），故换轨
+- 元素带 primitive 记法；权重首用 ~1.2GB 后离线
+
+### U3 · 图表理解传感器 vs_chart.py
+
+- 图表→结构化数据专用管线（title/x_axis/y_axis/series[{name,points}]/notes），
+  走 vs_vlm 网关，max_tokens=4096 并剥离思考型 <think> 块后解析
+- 合成柱状图实测：标题+四季度数值全部正确提取；理念=提取与推理分离
+
+### U1 · L2 模型可配置
+
+- config `pi-vision-struct.json` 新增 `l2_model` 键：semantic/critic/chart 默认档位
+  一处切换（解析顺序 config > 内置默认）；--model 显式覆盖仍有效
+
+### P3 · 发布验证（Docker 裸机最坏路径）
+
+- ubuntu:24.04（无 python3）：安装器输出 "✗ 需要 python3（安装 miniforge 后会自动获得）"
+- python:3.12-slim（无 conda）：结构化 JSON 指引 miniforge 安装 URL
+- 两场景均无堆栈崩溃，exit 语义正确 —— 新鲜机器失败模式全部可操作
+
+### 单端口注册
+
+- vs 工具 action 枚举 18→20（detect/chart）；注入 713 tokens（仍为原 1359 的约一半）
+
 ## 0.3.0 — 2026-08-25（单端口架构：4 工具 → 1 个 `vs`）
 
 ### 架构（系统工程优化）

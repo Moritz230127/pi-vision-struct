@@ -23,6 +23,8 @@
 | 布局审计（重叠/出界/对比度） | `audit`（先有 report JSON） |
 | 设计准则（对齐/间距/安全区/对比度） | `rules`（report JSON） |
 | 对可疑 finding 做 VLM 复核 | `critic`（enable=true，慢） |
+| 自然图像开放词表物体检测 | `detect`（classes 必填） |
+| 图表转结构化数据（ChartQA 短板） | `chart`（enable=true） |
 | 相似图片分组（壁纸/截图聚类） | `cluster` |
 | 环境自检 | `env` 或 `/vs check` |
 
@@ -55,6 +57,10 @@
 - `audit`：`report` 必填；`canvas`(WxH)、`overlap_threshold`
 - `rules`：`report` 必填；`canvas`、`align_tol`(默认4px)、`margin`。**R1对比度/R2重叠/R3对齐/R4间距/R5安全区**
 - `critic`：`report`+`image` 必填；`enable=true` 才调 VLM；`max_critic`(默认8)、`margin`。**裁剪可疑区 → qwen3-vl 裁决。注意：出界/安全区等全局属性缺陷在裁剪视图会误拒**
+
+### 理解扩展
+- `detect`：`image`+`classes`(逗号分隔开放词表) 必填；`threshold`(默认0.25)、`max_items`。**OWLv2 zero-shot 物体检测，image_px bbox；权重首用 ~1.2GB 后离线**
+- `chart`：`image` 必填；`region`、`enable=true`(opt-in)。**图表→结构化数据（title/axis/series/points），数值推理交还文本模型**
 
 ### 聚类（omniparser env）
 - `cluster`：`dir` 或 `files`(逗号分隔)；`threshold`(默认0.75)、`max_files`。**CLIP ViT-B-32 输出 clusters[]+top_pairs[]；首次下模型 ~350MB 后离线**

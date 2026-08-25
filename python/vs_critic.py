@@ -113,9 +113,9 @@ def critic_judge(
         if verdict not in ("confirmed", "rejected", "uncertain"):
             verdict = "uncertain"
         return {
-            "ok": True, "verdict": verdict,
+            "ok": True, "verdict": verdict, "model": r.get("model"),
             "reason": str(parsed.get("reason", ""))[:200],
-            "model": model, "ms": int((time.time() - t0) * 1000),
+            "ms": int((time.time() - t0) * 1000),
         }
     except Exception as e:
         return {"ok": False, "verdict": "uncertain", "error": str(e)[:300], "ms": int((time.time() - t0) * 1000)}
@@ -128,7 +128,7 @@ def main() -> int:
     ap.add_argument("--enable", action="store_true", help="显式开启 VLM 复核（默认 opt-in 关闭）")
     ap.add_argument("--max-critic", type=int, default=8)
     ap.add_argument("--margin", type=int, default=4)
-    ap.add_argument("--model", default="qwen3-vl:8b")
+    ap.add_argument("--model", default=None, help="默认取 config l2_model")
     ap.add_argument("--base-url", default="http://localhost:11434")
     ap.add_argument("--max-tokens", type=int, default=2048)
     ap.add_argument("--timeout", type=int, default=300)
@@ -157,7 +157,7 @@ def main() -> int:
     critic_stats = {
         "enabled": True, "checked": 0,
         "confirmed": 0, "rejected": 0, "uncertain": 0,
-        "model": args.model, "image_size": image_size, "margin": args.margin,
+        "model": args.model or __import__("vs_vlm").default_model(), "image_size": image_size, "margin": args.margin,
     }
     crop_dir = None
     if args.keep_crops and crops:
