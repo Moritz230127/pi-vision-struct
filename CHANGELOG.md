@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.0 — 2026-08-25（正式发布：Linux）
+
+### 定位
+
+- 平台收窄为 **Linux x86_64 only**：package.json `os:["linux"]`；macOS/Windows 安装器指引从 README 移除
+- README 全面重写：详细架构设计（分层通道/单端口/自稳定层/沙箱模型/坐标系）+
+  手把手安装教程（七步、每步带验证命令、不依赖一键脚本）
+
+### 发布门禁证据
+
+- **安装教程成功路径 Docker 全程实测**：纯净 ubuntu:24.04 按教程步骤 0→1→3 逐字执行——
+  Miniforge 124MB 安装 → mamba 2.5.0 → pi-vision env → requirements.txt → 核心依赖导入 OK；
+  vs_setup --check 无 git 环境按预期降级。加上此前失败路径双场景，安装体验两端均已验证
+- 功能面：G1 静态全绿；G2 fusion 8/8；G3 客户视角 19 例 ONE_SHOT_PASS；注入 ~713 tokens
+- 能力面（v0.4.0）：OWLv2 detect / chart 图表转数据 / l2_model 可配置
+
 ## 0.4.0 — 2026-08-25（能力补全：U1 L2可配置 + U2 detect + U3 chart + P3 发布验证）
 
 ### U2 · 自然图像检测传感器 vs_detect.py
