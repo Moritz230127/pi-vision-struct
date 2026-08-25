@@ -7,3 +7,4 @@ tests/_out/
 # 本地备份文件不入库（封装纪律：变更一律走 git，可回滚）
 *.bak*
 __pycache__/
+weights/
