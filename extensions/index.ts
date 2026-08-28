@@ -1,22 +1,17 @@
 /**
- * pi-vision-struct — 结构化视觉扩展（分组 CLI 风格，4 工具）
+ * pi-vision-struct — 数理化视觉扩展（单端口 22 动作，零 VLM 主观描述）
  *
- * 为纯文本模型（DeepSeek）提供像素级精确的视觉通道：
- * 工具输出结构化 JSON（数字/坐标/hex），而非自然语言转述。
+ * 为纯文本 LLM（DeepSeek）提供最高精度的数理化视觉通道：
+ * 全部输出为带单位的数值（坐标/hex/矩阵/统计），零主观描述。
+ * 传感器只做精确计算，文本模型在数字上做推理。
  *
- * 分层无损通道（vision-report/v2）：
- *   L0 源码    → vs_struct  (dom / pptx / omniparser)
- *   L1 测量    → vs_measure (capture / pixels / ocr / wallpaper / semantic / env)
- *   融合/准则  → vs_fuse    (analyze / crosscheck / audit / rules / critic)
- *   感知聚类   → vs_cluster (CLIP 相似图分组)
+ * 分层模型（vision-report/v3）：
+ *   L0 源码    → dom / pptx / a11y / blender_dump（场景图 4×4 矩阵 + 8点bbox3d）
+ *   L1 测量    → pixels / ocr / scene_stats / depth / detect / omniparser
+ *   融合       → analyze / crosscheck / audit / rules / audit3d（3D 间隙/干涉）
+ *   感知聚类   → cluster（CLIP）
  *
- * 设计决策：15 个细粒度工具 → 4 个分组工具（action 枚举）。
- *   - 每轮工具 schema token 约降 40%（共享参数去重）
- *   - 模型路由选择面变小（准确率提升）
- *   - action 用 enum 校验，保留参数校验的大部分收益
- *   - 完整命令参考在技能 skills/vision-situation（按需加载，不进 AGENTS.md）
- *
- * 全部只读、本地、无网络外发。Python 脚本惰性启动（调用时才拉起进程）。
+ * 设计：22 个细粒度能力 → 单端口 `vs`（action 枚举）；全部输出可复算。
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -189,7 +184,8 @@ function runPython(
 		// inline (-c) 为健康/环境自检路径；vs_setup.py 为诊断/修复自身，均豁免预检 ——
 		// 保证自诊断永不被自诊断阻断
 		const isSelfDiag = args.some((a) => String(a).includes("vs_setup.py"));
-		if (args[0] !== "-c" && !isSelfDiag) {
+		const isBash = pythonBin === "bash" || pythonBin.endsWith("/bash");
+		if (args[0] !== "-c" && !isSelfDiag && !isBash) {
 			const pf = await preflight(pythonBin, `${PKG_ROOT}python`);
 			if (!pf.ok) {
 				logFailure("preflight", args.slice(0, 4), pf.detail ?? "failed");
@@ -202,8 +198,7 @@ function runPython(
 		}
 		return await new Promise<string>((resolve) => {
 		// 沙箱: bwrap 内核隔离（--unshare-net 零网络、--ro-bind / 只读根）。
-		// 豁免（sandbox=false）: dom（本职加载用户 URL）/ critic / semantic
-		// （依赖宿主 Ollama 的 127.0.0.1，硬编码无用户可控目标，已审计）。
+		// 豁免（sandbox=false）: dom（本职加载用户 URL）/ a11y（会话 DBus）
 		// 非 Linux / 无 bwrap 平台自动无沙箱（配置或 VS_NO_SANDBOX 可禁用）。
 		const useSandbox = SANDBOX_ENABLED && sandbox;
 		const cmd = useSandbox ? BWRAP : pythonBin;
@@ -272,7 +267,7 @@ const T = {
 	normal: 60_000, // dom / ocr / 融合单步
 	heavy: 120_000, // pdf
 	doc: 300_000, // 整页管线 / 版式模型
-	vlm: 360_000, // critic 多区域 VLM 复核
+	vlm: 360_000, // 已废弃（原 critic 复核），保留键名兼容旧配置
 	model: 600_000, // omniparser 冷启动
 	modelXL: 900_000, // CLIP 批量聚类
 };
@@ -312,9 +307,9 @@ const MEASURE: Record<string, Act> = {
 			...flag(p, "daemon", "--daemon"),
 		],
 	},
-	chart: {
+	chart_data: {
 		script: "vs_chart.py",
-		sandbox: false, // 依赖宿主 Ollama 127.0.0.1
+		sandbox: false,
 		timeout: T.vlm,
 		build: (p) => [
 			...flag(p, "image", "--image"),
@@ -335,15 +330,13 @@ const MEASURE: Record<string, Act> = {
 			...flag(p, "semantic_max", "--semantic-max"),
 		],
 	},
-	semantic: {
-		script: "vs_semantic.py",
-		sandbox: false, // 依赖宿主 Ollama 127.0.0.1（硬编码目标）
-		timeout: T.vlm,
+	scene_stats: {
+		script: "vs_scene_stats.py",
+		timeout: T.short,
 		build: (p) => [
 			...flag(p, "image", "--image"),
-			...on(p, "enable", "--enable"),
-			...flag(p, "prompt", "--prompt"),
-			...flag(p, "max_tokens", "--max-tokens"),
+			...flag(p, "region", "--region"),
+			...flag(p, "colors", "--colors"),
 		],
 	},
 	env: {
@@ -478,16 +471,27 @@ const FUSE: Record<string, Act> = {
 			...flag(p, "margin", "--margin"),
 		],
 	},
-	critic: {
-		script: "vs_critic.py",
-		sandbox: false, // 依赖宿主 Ollama 127.0.0.1（硬编码目标）
-		timeout: T.modelXL,
+	audit3d: {
+		script: "vs_audit3d.py",
+		timeout: T.normal,
 		build: (p) => [
 			...flag(p, "report", "--report"),
+			...flag(p, "gap_threshold", "--gap-threshold"),
+		],
+	},
+	blender_dump: {
+		script: "blender_dump_wrapper.sh",
+		bin: "bash",
+		timeout: T.heavy,
+		build: (p) => [
+			...flag(p, "blend", "--blend"),
+		],
+	},
+	depth: {
+		script: "vs_depth.py",
+		timeout: T.heavy,
+		build: (p) => [
 			...flag(p, "image", "--image"),
-			...on(p, "enable", "--enable"),
-			...flag(p, "max_critic", "--max-critic"),
-			...flag(p, "margin", "--margin"),
 		],
 	},
 };
@@ -664,16 +668,22 @@ pi.registerCommand("vs", {
 		name: "vs",
 		label: "Vision Suite 视觉套件（单端口 18 动作）",
 		description:
-			"视觉套件单端口18动作。测量：capture截图(out)/pixels取色diff WCAG(image)/ocr文字坐标(image)/wallpaper分类(dir)/semantic语义(image,enable)/env自检。结构：dom网页(url)/pptx(file)/omniparser图标级(image)/layout版式(image)/pdf(file)/a11y无障碍树(app,list)。融合：analyze整页(task,input)/crosscheck互验(image,dom,ocr)/audit审计(report)/rules准则(report)/critic复核(report,image,enable)。cluster聚类(dir或files)。先capture后分析；audit/rules/critic需先有报告JSON；数字以输出JSON为准。",
+			"数理化视觉套件（v0.5.0）22动作。全部输出为精确数值/坐标/hex/矩阵，零主观描述。\n"
+			+ "测量：capture截图(out)/pixels取色(image,region,colors)/ocr文字坐标(image)/wallpaper(dir)/scene_stats数理统计(image)/env。\n"
+			+ "结构：dom(url)/pptx(file)/omniparser(image)/layout(image)/pdf(file)/a11y(app,list)/detect(image,classes,阈值)。\n"
+			+ "三维：blender_dump(blend)→场景图4×4矩阵+8点bbox3d/depth(blend+image)→深度矩阵→mm统计/audit3d(report,阈值mm)→间隙/干涉。\n"
+			+ "融合：analyze(task)/crosscheck互验(image)/audit(report)/rules(report)。CLIP聚类(dir)。\n"
+			+ "原则：先capture后分析；所有输出带单位；数值推理由DeepSeek执行。",
 		parameters: Type.Object({
 			action: Type.Union([
 				Type.Literal("capture"), Type.Literal("pixels"), Type.Literal("ocr"),
-				Type.Literal("wallpaper"), Type.Literal("semantic"), Type.Literal("env"),
+				Type.Literal("wallpaper"), Type.Literal("scene_stats"), Type.Literal("env"),
 				Type.Literal("dom"), Type.Literal("pptx"), Type.Literal("omniparser"),
 				Type.Literal("layout"), Type.Literal("pdf"), Type.Literal("a11y"),
 				Type.Literal("analyze"), Type.Literal("crosscheck"), Type.Literal("audit"),
-				Type.Literal("rules"), Type.Literal("critic"), Type.Literal("cluster"),
-				Type.Literal("detect"), Type.Literal("chart"),
+				Type.Literal("rules"), Type.Literal("cluster"),
+				Type.Literal("detect"), Type.Literal("chart_data"),
+				Type.Literal("blender_dump"), Type.Literal("depth"), Type.Literal("audit3d"),
 			]),
 			out: Type.Optional(Type.String({ description: "截屏输出路径（capture）" })),
 			image: Type.Optional(Type.String({ description: "图片路径（pixels/ocr等多数动作）" })),
@@ -686,13 +696,17 @@ pi.registerCommand("vs", {
 			ext: Type.Optional(Type.String({ description: "扩展名列表（wallpaper）" })),
 			max_files: Type.Optional(Type.Number({ description: "最多文件（wallpaper/cluster，默认200）" })),
 			prompt: Type.Optional(Type.String({ description: "自定义语义提示词（semantic）" })),
-			enable: Type.Optional(Type.Boolean({ description: "开启 L2/VLM（semantic/critic/wallpaper语义）" })),
+			enable: Type.Optional(Type.Boolean({ description: "开启 L2/VLM（wallpaper语义）" })),
 			upscale: Type.Optional(Type.Number({ description: "OCR 放大倍数（默认2）" })),
 			max_items: Type.Optional(Type.Number({ description: "最多条目（ocr/omniparser/layout/pdf）" })),
 			min_conf: Type.Optional(Type.Number({ description: "最低置信度（ocr/layout）" })),
 			backend: Type.Optional(Type.String({ description: "OCR 后端 rapidocr|paddle（ocr）" })),
 			preprocess: Type.Optional(Type.String({ description: "none|contrast（ocr）" })),
 			daemon: Type.Optional(Type.String({ description: "auto|always|never（ocr paddle 常驻）" })),
+			blend: Type.Optional(Type.String({ description: "Blender 文件路径（blender_dump/depth）" })),
+			camera: Type.Optional(Type.String({ description: "摄像机名称（depth blender-zpass）" })),
+			output: Type.Optional(Type.String({ description: "输出 JSON 路径（blender_dump/depth）" })),
+			gap_threshold: Type.Optional(Type.Number({ description: "间隙阈值 mm（audit3d，默认15）" })),
 			url: Type.Optional(Type.String({ description: "URL（dom；analyze 可选）" })),
 			max_elements: Type.Optional(Type.Number({ description: "最多元素（dom/a11y，默认60/80）" })),
 			screenshot: Type.Optional(Type.String({ description: "DOM 会话截图输出（dom）" })),
