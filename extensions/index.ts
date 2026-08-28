@@ -477,6 +477,7 @@ const FUSE: Record<string, Act> = {
 		build: (p) => [
 			...flag(p, "report", "--report"),
 			...flag(p, "gap_threshold", "--gap-threshold"),
+			...on(p, "method", "--method"),
 		],
 	},
 	blender_dump: {
@@ -707,6 +708,7 @@ pi.registerCommand("vs", {
 			camera: Type.Optional(Type.String({ description: "摄像机名称（depth blender-zpass）" })),
 			output: Type.Optional(Type.String({ description: "输出 JSON 路径（blender_dump/depth）" })),
 			gap_threshold: Type.Optional(Type.Number({ description: "间隙阈值 mm（audit3d，默认15）" })),
+			method: Type.Optional(Type.String({ description: "精度档（audit3d）：auto=OBB-SAT+网格KDTree最大精度 / obb=仅有向包围盒分离轴 / mesh=仅点云距离 / aabb=原AABB回退" })),
 			url: Type.Optional(Type.String({ description: "URL（dom；analyze 可选）" })),
 			max_elements: Type.Optional(Type.Number({ description: "最多元素（dom/a11y，默认60/80）" })),
 			screenshot: Type.Optional(Type.String({ description: "DOM 会话截图输出（dom）" })),

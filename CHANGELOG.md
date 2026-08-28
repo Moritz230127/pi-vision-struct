@@ -1,5 +1,35 @@
 # Changelog
 
+## 2.1.0 — 2026-08-28（audit3d 最大精度重构）
+
+### 问题
+
+- 涡扇场景图 AABB 审计误报 1042 干涉：嵌套/同心结构（转子在静子内、机匣包裹压气机）的
+  轴对齐包围盒天然重叠，但实际网格间存在装配间隙，并非真实穿透。
+
+### 修复（最大精度）
+
+- `vs_blender_dump.py`：导出真实世界坐标点云 `verts`（MESH 多边形顶点 + CURVE 样条离散点，
+  每物体 ≤4000 下采样）；新增 `parent` 字段；保留 `collection` 层级。
+- `vs_audit3d.py` 重写精度模型（三级递进，对每对 MESH/CURVE）：
+  1. **AABB 预筛**：已分离的成对物体直接跳过（不计任何计数）
+  2. **OBB-SAT**：用 `bbox3d` 8 角点直接构造有向包围盒，分离轴定理（15 轴）判定，
+     旋转感知，比 AABB 紧致，消除旋转假干涉
+  3. **网格级 surface-to-surface 距离**（核心）：`scipy.cKDTree` 双向最近邻求最小表面间距。
+     环形间隙 → 正间隙判 `clearance`；真实接触 → 距离≈0 判 `interference`。
+  - 新增 `--method`：`auto`(默认 OBB+Mesh) / `obb` / `mesh` / `aabb`(回退)
+  - 新增 `verified_clearance` 指标：经网格级确认存在真实正间隙的成对数量
+- 依赖：pi-vision env 新增 `scipy`（cKDTree 必需）；requirements.txt 更新。
+
+### 验证（turbofan_v4.blend，172 MESH + 8 CURVE，16110 对）
+
+- AABB 档：interference=1042，clearance=0
+- OBB 档：interference=952，clearance=128
+- **auto 档（最大精度）：interference=4，gap_warn=126，clearance=1056**
+- 剩余 4 真干涉均经 KDTree 验证表面距离 0.0mm（spinner↔tip_cap、nacelle↔bypass_duct、
+  core_casing↔bypass_duct、elbow↔elbow），为结构件真实接触，非误报。
+- 客户视角 19/19 零报错一次通过；fusion 8/8。
+
 ## 1.0.0 — 2026-08-25（正式发布：Linux）
 
 ### 定位

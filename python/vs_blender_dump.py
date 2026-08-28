@@ -34,6 +34,47 @@ def get_collection_name(obj) -> str:
     return "Collection"
 
 
+def export_world_verts(obj, max_verts: int = 4000) -> list[list[float]] | None:
+    """导出物体世界坐标顶点（下采样），用于 GJK 凸包距离精确判定。
+
+    下采样保留形状特征点：先取全部顶点，超过 max_verts 时均匀抽稀。
+    世界坐标 = matrix_world @ local_vertex。
+    支持 MESH（多边形顶点）与 CURVE（样条离散点）——管道/线缆常以曲线建模，
+    必须纳入点云距离，否则回退 AABB 产生假干涉。
+    """
+    mw = obj.matrix_world
+    pts: list = []
+    if obj.type == "MESH" and obj.data and hasattr(obj.data, "vertices"):
+        co = obj.data.vertices
+        n = len(co)
+        if n == 0:
+            return None
+        step = max(1, (n + max_verts - 1) // max_verts)
+        for k in range(0, n, step):
+            v = mw @ co[k].co
+            pts.append([round(float(v[i]), 6) for i in range(3)])
+    elif obj.type == "CURVE" and obj.data and hasattr(obj.data, "splines"):
+        # 样条离散：沿每条样条按等分取点（保留形状）
+        per_spline = max(2, max_verts // max(1, len(obj.data.splines)))
+        for spline in obj.data.splines:
+            pts_local = [p.co.copy().xyz if hasattr(p.co, "xyz") else p.co
+                         for p in spline.points] or \
+                        [p.co.copy().xyz if hasattr(p.co, "xyz") else p.co
+                         for p in spline.bezier_points]
+            if not pts_local:
+                continue
+            m = len(pts_local)
+            step = max(1, (m + per_spline - 1) // per_spline)
+            for k in range(0, m, step):
+                v = mw @ pts_local[k]
+                pts.append([round(float(v[i]), 6) for i in range(3)])
+        if not pts:
+            return None
+    else:
+        return None
+    return pts
+
+
 def get_material_info(obj) -> dict | None:
     if obj.type not in ("MESH", "CURVE", "SURFACE", "META", "FONT"):
         return None
@@ -123,6 +164,7 @@ def main():
             "name": obj.name,
             "type": obj.type,
             "collection": get_collection_name(obj),
+            "parent": obj.parent.name if obj.parent else None,
             "matrix_world": mat_world,
             "bbox3d": bbox,
             "center": center,
@@ -130,6 +172,7 @@ def main():
             "tris": tris,
             "visible": visible,
             "material": get_material_info(obj),
+            "verts": export_world_verts(obj) if obj.type in ("MESH", "CURVE") else None,
         }
         objects3d.append(obj_info)
 

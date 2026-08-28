@@ -145,9 +145,21 @@ DeepSeek 在文本推理上是最强模型之一，它不需要别人替它"理�
 | `crosscheck` | `image` + `dom`/`ocr`/`dpr` | DOM↔OCR↔像素三方互验（Δδ 数值）|
 | `audit` | `report` + `canvas`/`overlap_threshold` | 2D 重叠/出界/对比度 |
 | `rules` | `report` + `canvas`/`align_tol`/`margin` | 设计准则（对齐/间距/安全区）|
-| `audit3d` | `report` + `gap_threshold` | 3D 间隙/干涉 |
+| `audit3d` | `report` + `gap_threshold`/`method` | 3D 间隙/干涉，最大精度档 |
 
-> 技能文件 `skills/vision-situation/SKILL.md` 含决策表与示例。
+#### audit3d 精度模型（最大精度）
+
+对每对 MESH/CURVE 物体逐级判定：
+
+1. **AABB 预筛**：轴对齐包围盒已分离（间隙 > 阈值）→ 直接跳过（不计入任何计数）
+2. **OBB-SAT**：用 `bbox3d` 的 8 个世界角点直接构造有向包围盒，分离轴定理（15 轴）判定。旋转感知，比 AABB 紧致，消除因旋转产生的假干涉
+3. **网格级 surface-to-surface 距离**（最大精度核心）：导出两物体世界坐标点云，用 `scipy.cKDTree` 双向最近邻求最小表面间距。
+   - 同心/嵌套结构（转子在静子内、机匣包裹压气机）因存在环形间隙 → 得到**正间隙** → 判为 `clearance`（非干涉），正确保留装配间隙
+   - 真实穿透/接触 → 距离 ≈ 0 → 判为 `interference`
+
+`--method`：`auto`（默认，OBB+Mesh 级最大精度）/ `obb`（仅有向包围盒）/ `mesh`（仅点云距离）/ `aabb`（原 AABB 回退）。
+
+> 涡扇验证：AABB=1042 假干涉 → OBB=952 → auto(mesh)=**4 真干涉** + 1056 已验证真实间隙。剩余 4 例为结构件真实接触（spinner↔tip_cap、nacelle↔bypass_duct、core_casing↔bypass_duct、elbow↔elbow，表面距离均 0.0mm）。
 
 ---
 
@@ -157,7 +169,7 @@ DeepSeek 在文本推理上是最强模型之一，它不需要别人替它"理�
 |---|---|---|
 | 涡扇 4K 渲染 10 图 | 颜色/对比度/空间布局 | 主色 #ECF0F2 14.77% 等，对比度 2.09~18.64 |
 | 涡扇 depth 10 图 | median 深度分布 | 0.08~0.68 相对深度，全图产出 |
-| 涡扇场景图 196物体 | 8相机 / 17集合 / 547万面 / AABB 审计 | 180网格物体 / 16110对 / 1042干涉 / 144间隙警告 |
+| 涡扇场景图 196物体 | 8相机 / 17集合 / 547万面 / 最大精度审计 | 180 MESH+8 CURVE / 16110对 / **4 真干涉** / 1056 已验证间隙 |
 | 融合回归 | 8断言 | 全部通过 |
 
 ```bash
@@ -169,7 +181,7 @@ mamba run -n pi-vision python -u tests/run_self_tests.py
 
 ## 五、已知限制
 
-- 涡扇 AABB 干涉计数偏高（1042）——因嵌套结构（机匣包压气机等）的包围盒天然重叠；需配合集合过滤或精细网格判定
-- `audit3d` 仅做 AABB 级检测，精细网格级干涉需配合 `geo_utils_v3` 参数化内核
+- 点云距离精度取决于导出顶点密度（默认每物体 ≤4000 点下采样）；极高密度需求可上调 `export_world_verts` 的 `max_verts`
+- `scipy` 为 `audit3d` 网格级精度的硬依赖（cKDTree）；缺失时自动回退 OBB/AABB 档
 - 模型自身不能看图：**永远先调工具取结构化数据，再基于数字推理**
 - 仅 Linux；layout / cluster / detect 首次需联网下载权重
