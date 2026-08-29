@@ -67,7 +67,7 @@ DeepSeek 在文本推理上是最强模型之一，它不需要别人替它"理�
 - **坐标系**：`coordsys` 字段声明（`css_px` / `device_px` / `image_px` / `screen_px` / `world_m` / `pt`），跨动作比较先用 schema 变换换算
 - **单位**：全部数值带单位（mm / px / hex / conf 0-1 / WCAG 比值）
 - **可复算**：每个输出都能在原图/原模型上用独立代码验证
-- **零幻觉**：无 VLM 热路径（env 自检除外），依赖网络的模型调用全部移除
+- **零幻觉**：数值主链无 VLM 热路径；`semantic`/`chart_data` 为**可选语义兜底**，明确标记 `semantic_fallback`，仅当用户需要语义理解时调用，不参与数值推理主链
 
 ---
 
@@ -81,7 +81,7 @@ DeepSeek 在文本推理上是最强模型之一，它不需要别人替它"理�
 |---|---|---|
 | MEASURE | `capture` `pixels` `ocr` `wallpaper` `scene_stats` `env` | PIL / rapidocr / paddle |
 | STRUCT | `dom` `pptx` `omniparser` `layout` `pdf` `a11y` `detect` | playwright / CLIP / OWLv2 |
-| 3D | `blender_dump` `depth` | bpy headless / 亮度梯度 |
+| 3D | `blender_dump` `depth` `depth_geom` | bpy headless / 亮度梯度（depth 回退）/ 真几何深度栅格化（depth_geom 主用） |
 | FUSE | `analyze` `crosscheck` `audit` `rules` `audit3d` | 纯矩阵/阈值运算 |
 
 > 单端口设计使上下文注入从 1359 tokens 降至约 850（-38%），且分发表即真相——新增动作 = 表加一行 + 枚举加一项。
@@ -134,7 +134,8 @@ DeepSeek 在文本推理上是最强模型之一，它不需要别人替它"理�
 | 动作 | 参数 | 说明 |
 |---|---|---|
 | `blender_dump` | `blend` 必填 | Blender 场景图：`objects3d[]`（matrix_world 4×4 + bbox3d 8×3 + collection/material/visible）+ cameras（fov/矩阵）|
-| `depth` | `image` 必填 | 深度矩阵统计（near/far/median/std/histogram/center_depth），相对亮度梯度 |
+| `depth` | `image` 必填 | 深度矩阵统计（near/far/median/std/histogram/center_depth），亮度梯度（无 Blend 时回退）|
+| `depth_geom` | `blend`+`camera`/`image` | **真几何深度**：Blender 内栅格化相机空间距离（米），非亮度近似；涡扇实测 0.74~2.05m |
 | `audit3d` | `report` + `gap_threshold`(默认15mm) | AABB 干涉/间隙检测：interference(相交) + tight_gap(<阈值) |
 
 ### 融合（deterministic）
@@ -146,6 +147,7 @@ DeepSeek 在文本推理上是最强模型之一，它不需要别人替它"理�
 | `audit` | `report` + `canvas`/`overlap_threshold` | 2D 重叠/出界/对比度 |
 | `rules` | `report` + `canvas`/`align_tol`/`margin` | 设计准则（对齐/间距/安全区）|
 | `audit3d` | `report` + `gap_threshold`/`method` | 3D 间隙/干涉，最大精度档 |
+| `semantic` | `image` + `prompt`/`model` | **可选 VLM 语义兜底**：不进数值主链；本地 Ollama（127.0.0.1），输出带 `semantic_fallback` 标记，与数值报告区分 |
 
 #### audit3d 精度模型（最大精度）
 

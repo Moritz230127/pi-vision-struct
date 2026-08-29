@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.2.0 — 2026-08-29（真几何深度 + VLM 语义兜底 + 依赖健壮性）
+
+### ① 真几何深度（depth_geom）
+
+- 新增 `vs_depth_geom.py` + `depth_geom_wrapper.sh`：在 Blender 内将所有 MESH 三角面栅格化到
+  相机空间深度缓冲，得到真实几何距离（米），非亮度梯度近似。
+- 向量化投影 + 扫描线光栅化（numpy）：480p 约 42s、1080p 约 57s（主要为 Blender 启动）。
+- 涡扇实测：near=0.75m / far=2.05m / median≈1.9m，与引擎真实尺寸吻合。
+- `depth` 动作现路由 Blender 几何深度（主用）；原亮度梯度 `vs_depth.py` 保留为无 Blend 时的回退。
+
+### ② 可选 VLM 语义兜底（semantic）
+
+- 新增 `vs_semantic_v2.py` + `semantic` 动作：不进入数理化主链，明确标记 `semantic_fallback: true`。
+- 走本地 Ollama（127.0.0.1 硬编码，无外发），输出带 note 提示与数值报告区分。
+- 仅当用户明确需要语义理解时调用（如这图讲了什么故事）。
+- 图像自动下采样至 1024 边，避免超出 VLM 上下文（4K 图原会触发 400 错误）。
+
+### ③ Python 依赖健壮性
+
+- `vs_chart.py` 移除对 `vs_vlm` 的硬 import，改为内联 Ollama 网关（与 semantic 同源），
+  Ollama 不可用时返回结构化错误 + 修复提示，不再崩溃。
+- `depth` 动作不再依赖 torch（几何深度走 Blender，亮度回退走 PIL）；omniparser env 仍承载 detect/cluster/omniparser。
+- 全部脚本 `py_compile` 通过；客户视角 21 例（含 depth_geom + semantic）零报错一次过。
+
 ## 2.1.0 — 2026-08-28（audit3d 最大精度重构）
 
 ### 问题

@@ -480,6 +480,17 @@ const FUSE: Record<string, Act> = {
 			...on(p, "method", "--method"),
 		],
 	},
+	// 可选 VLM 语义兜底：不进入数值主链；sandbox=false（宿主 Ollama 127.0.0.1 硬编码）
+	semantic: {
+		script: "vs_semantic_v2.py",
+		sandbox: false,
+		timeout: T.vlm,
+		build: (p) => [
+			...flag(p, "image", "--image"),
+			...flag(p, "prompt", "--prompt"),
+			...flag(p, "model", "--model"),
+		],
+	},
 	blender_dump: {
 		script: "blender_dump_wrapper.sh",
 		bin: "bash",
@@ -489,10 +500,13 @@ const FUSE: Record<string, Act> = {
 		],
 	},
 	depth: {
-		script: "vs_depth.py",
+		script: "depth_geom_wrapper.sh",
+		bin: "bash",
 		timeout: T.heavy,
 		build: (p) => [
+			...flag(p, "blend", "--blend"),
 			...flag(p, "image", "--image"),
+			...flag(p, "camera", "--camera"),
 		],
 	},
 };
@@ -685,6 +699,7 @@ pi.registerCommand("vs", {
 				Type.Literal("rules"), Type.Literal("cluster"),
 				Type.Literal("detect"), Type.Literal("chart_data"),
 				Type.Literal("blender_dump"), Type.Literal("depth"), Type.Literal("audit3d"),
+				Type.Literal("semantic"),
 			]),
 			out: Type.Optional(Type.String({ description: "截屏输出路径（capture）" })),
 			image: Type.Optional(Type.String({ description: "图片路径（pixels/ocr等多数动作）" })),
@@ -696,7 +711,8 @@ pi.registerCommand("vs", {
 			dir: Type.Optional(Type.String({ description: "图片目录（wallpaper/cluster）" })),
 			ext: Type.Optional(Type.String({ description: "扩展名列表（wallpaper）" })),
 			max_files: Type.Optional(Type.Number({ description: "最多文件（wallpaper/cluster，默认200）" })),
-			prompt: Type.Optional(Type.String({ description: "自定义语义提示词（semantic）" })),
+			prompt: Type.Optional(Type.String({ description: "提示词（semantic 语义兜底）" })),
+			model: Type.Optional(Type.String({ description: "VLM 模型（semantic 兜底，默认取配置 l2_model）" })),
 			enable: Type.Optional(Type.Boolean({ description: "开启 L2/VLM（wallpaper语义）" })),
 			upscale: Type.Optional(Type.Number({ description: "OCR 放大倍数（默认2）" })),
 			max_items: Type.Optional(Type.Number({ description: "最多条目（ocr/omniparser/layout/pdf）" })),
