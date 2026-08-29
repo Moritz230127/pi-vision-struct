@@ -20,6 +20,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,13 @@ import vs_schema as S
 
 ROOT = Path(__file__).resolve().parent
 PYBIN = "/home/Arch/conda-envs/pi-vision/bin/python"
+
+# 合法 task 名：仅允许文件名安全字符（防止把自然语言当成文件路径）
+_TASK_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_\-]{0,63}$")
+
+
+def _valid_task_name(task: str) -> bool:
+    return bool(_TASK_NAME_RE.match(task))
 
 
 def run(cmd: list[str], timeout: int) -> tuple[int, str]:
@@ -50,9 +58,23 @@ def main() -> int:
     ap.add_argument("--input")
     ap.add_argument("--url")
     ap.add_argument("--compare", help="diff 任务的对比图路径（$COMPARE）")
+    ap.add_argument("--prompt", help="自由文本指令（随报告带出，供下游语义兜底/人工参考）")
     ap.add_argument("--dpr", type=float, default=1.0)
     ap.add_argument("--timeout", type=int, default=180)
     args = ap.parse_args()
+
+    # 防御：task 应是配置名（文件名安全字符）。若传了自然语言长句，明确报错并列出可用任务。
+    if not _valid_task_name(args.task):
+        avail = sorted(p.name[:-5] for p in (ROOT / "tasks").glob("*.json"))
+        hint = (
+            f"task 参数应为预置任务配置名，而非自由文本。"
+            f"检测到传入值形如自然语言指令（长度 {len(args.task)}）。\n"
+            f"可用任务: {', '.join(avail)}\n"
+            f"若需自由文本视觉分析，请用 semantic 动作（VLM 语义兜底）。"
+        )
+        print(json.dumps({"error": "invalid task name", "detail": hint[:600]},
+                         ensure_ascii=False))
+        return 1
 
     try:
         cfg_path = ROOT / "tasks" / f"{args.task}.json"
@@ -125,6 +147,12 @@ def main() -> int:
         )
         if skipped:
             merged["skipped_steps"] = skipped
+        if args.prompt:
+            merged["user_prompt"] = args.prompt
+            merged["note"] = (
+                "analyze 仅执行预置数值任务；自由文本问题请用 semantic 动作（VLM 兜底）"
+                "基于本报告的数值做推理。"
+            )
         print(S.dump_json(merged))
         return 0
     except Exception as e:

@@ -439,6 +439,7 @@ const FUSE: Record<string, Act> = {
 			...flag(p, "url", "--url"),
 			...flag(p, "dpr", "--dpr"),
 			...flag(p, "compare", "--compare"),
+			...flag(p, "prompt", "--prompt"),
 		],
 	},
 	crosscheck: {
@@ -737,8 +738,9 @@ pi.registerCommand("vs", {
 			app: Type.Optional(Type.String({ description: "应用名过滤（a11y）" })),
 			list: Type.Optional(Type.Boolean({ description: "仅列应用（a11y）" })),
 			with_text: Type.Optional(Type.Boolean({ description: "抓文本内容（a11y）" })),
-			task: Type.Optional(Type.String({ description: "任务名（analyze）" })),
+			task: Type.Optional(Type.String({ description: "预置任务配置名（analyze）：diagnose-screenshot / audit-pptx / classify-images / diff-screenshots。非自由文本" })),
 			input: Type.Optional(Type.String({ description: "输入 图片/pptx/目录（analyze）" })),
+			prompt: Type.Optional(Type.String({ description: "自由文本指令（analyze 随报告带出，不执行；真语义分析请用 semantic 动作）" })),
 			dpr: Type.Optional(Type.Number({ description: "DPR（默认1.0）" })),
 			dom: Type.Optional(Type.String({ description: "dom 报告 JSON（crosscheck）" })),
 			ocr: Type.Optional(Type.String({ description: "ocr 报告 JSON（crosscheck）" })),
