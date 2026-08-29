@@ -1,8 +1,10 @@
 # vision-situation — 视觉技能：何时用哪个动作
 
-> pi-vision-struct 扩展提供**单端口工具 `vs`**（18 个 action，严格本地化）：
-> 除 dom/critic/semantic 外全部动作在内核沙箱（bwrap --unshare-net：零网络+只读根）内运行。
-> 输出均为 schema v2 JSON（数字/坐标/hex，可直接推理）。全部本地、只读、无网络外发。
+> pi-vision-struct 提供**单端口工具 `vs`**（25 个 action，严格本地化），同时接入两个宿主：
+> **pi-coding-agent**（`/vs` 命令 + `vs` 工具）与 **Claude Code**（MCP server，`vs` 工具）。
+> 两个宿主共享同一份核心，参数与 action 完全一致。
+> 除 dom/a11y/semantic/chart_data/check/setup 外，全部动作在内核沙箱（bwrap --unshare-net：零网络+只读根）内运行。
+> 输出均为 schema v3 JSON（数字/坐标/hex，可直接推理）。全部本地、只读、无网络外发。
 > 本文件是完整命令参考——**遇到视觉任务时按此选择 action**。
 
 ## 一、任务 → action 决策表
@@ -22,11 +24,11 @@
 | DOM↔OCR↔像素三方互验 | `crosscheck` |
 | 布局审计（重叠/出界/对比度） | `audit`（先有 report JSON） |
 | 设计准则（对齐/间距/安全区/对比度） | `rules`（report JSON） |
-| 对可疑 finding 做 VLM 复核 | `critic`（enable=true，慢） |
 | 自然图像开放词表物体检测 | `detect`（classes 必填） |
-| 图表转结构化数据（ChartQA 短板） | `chart`（enable=true） |
+| 图表转结构化数据（ChartQA 短板） | `chart_data`（enable=true） |
 | 相似图片分组（壁纸/截图聚类） | `cluster` |
-| 环境自检 | `env` 或 `/vs check` |
+| 环境自检 | `env` 或 `check`（Claude Code）/ `/vs check`（pi） |
+| 安装/修复依赖 | `setup`（setup_args 传 --with-omniparser 等；Claude Code）/ `/vs setup`（pi） |
 
 > **高分辨率 zoom-in 工作流**：先整图 `ocr`/`pixels` 粗扫 → 对疑点区域带
 > `region=x1,y1,x2,y2` 重跑同动作细查（小字叠加 `upscale=3`）。两轮坐标同一坐标系，
@@ -40,7 +42,7 @@
 - `pixels`：`image` 必填；`regions`/`compare`(diff)/`colors`/`wcag`/`threshold`(默认30)。**精确 hex+百分比、ΔE、对比度**
 - `ocr`：`image` 必填；`region`/`upscale`/`max_items`/`min_conf`/`backend`(rapidocr 默认 ~2-5s | paddle 高召回，默认走常驻服务 ocrserver 自动拉起、单图亚秒级)/`preprocess`(contrast 低对比度用)/`daemon`(auto|always|never)。**text+4点bbox+conf**
 - `wallpaper`：`dir` 必填；`colors`/`max_files`/`ext`/`semantic`(opt-in)
-- `semantic`：`image` 必填；`enable=true` 才执行（L2 有思考成本）；`prompt` 可自定义
+- `semantic`：`image` 必填；`prompt` 可自定义。**可选 VLM 语义兜底（本地 Ollama），标记 semantic_fallback，不进数值主链**
 - `env`：环境自检（无参数）
 
 ### 结构（L0 + DL 感知）
@@ -56,11 +58,12 @@
 - `crosscheck`：`image` 必填；`dom`/`ocr` 报告 JSON、`dpr`、`color_threshold`(ΔE 默认5)。**颜色漂移/文本互验/重叠**
 - `audit`：`report` 必填；`canvas`(WxH)、`overlap_threshold`
 - `rules`：`report` 必填；`canvas`、`align_tol`(默认4px)、`margin`。**R1对比度/R2重叠/R3对齐/R4间距/R5安全区**
-- `critic`：`report`+`image` 必填；`enable=true` 才调 VLM；`max_critic`(默认8)、`margin`。**裁剪可疑区 → qwen3-vl 裁决。注意：出界/安全区等全局属性缺陷在裁剪视图会误拒**
+- `audit3d`：`report`(blender_dump 场景图) 必填；`gap_threshold`(默认15mm)、`method`(auto/obb/mesh/aabb)。**3D 间隙/干涉，最大精度档（OBB-SAT+网格点云 KDTree）**
+- `semantic`：`image` 必填；`prompt` 可自定义。**可选 VLM 语义兜底（本地 Ollama），标记 semantic_fallback，不进数值主链**
 
 ### 理解扩展
 - `detect`：`image`+`classes`(逗号分隔开放词表) 必填；`threshold`(默认0.25)、`max_items`。**OWLv2 zero-shot 物体检测，image_px bbox；权重首用 ~1.2GB 后离线**
-- `chart`：`image` 必填；`region`、`enable=true`(opt-in)。**图表→结构化数据（title/axis/series/points），数值推理交还文本模型**
+- `chart_data`：`image` 必填；`region`、`enable=true`(opt-in)。**图表→结构化数据（title/axis/series/points），数值推理交还文本模型**
 
 ### 聚类（omniparser env）
 - `cluster`：`dir` 或 `files`(逗号分隔)；`threshold`(默认0.75)、`max_files`。**CLIP ViT-B-32 输出 clusters[]+top_pairs[]；首次下模型 ~350MB 后离线**
@@ -75,11 +78,15 @@
 
 ## 四、示例调用（JSON 参数形态）
 
+> pi 宿主下用 `/vs` 命令或 `vs({...})` 工具；Claude Code 宿主下用 `vs({...})` 工具（MCP）。
+> 两种形态参数完全一致。
+
 ```json
 {"action": "capture", "out": "/tmp/vs_cap.png"}
 {"action": "ocr", "image": "/tmp/vs_cap.png", "upscale": 2}
 {"action": "pixels", "image": "/tmp/vs_cap.png", "colors": 8}
 {"action": "analyze", "task": "diagnose-screenshot", "input": "/tmp/vs_cap.png"}
 {"action": "rules", "report": "/tmp/report.json", "canvas": "1920x1067"}
-{"action": "critic", "report": "/tmp/report.json", "image": "/tmp/vs_cap.png", "enable": true, "max_critic": 4}
+{"action": "check"}
+{"action": "setup", "setup_args": "--with-omniparser"}
 ```

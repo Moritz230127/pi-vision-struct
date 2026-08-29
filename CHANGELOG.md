@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.2.2 — 2026-08-29（双宿主重构：pi-coding-agent + Claude Code/MCP）
+
+### ① 重架构为双宿主一等扩展
+
+- 抽离框架无关核心 `extensions/pi-vision-core.ts`（python 解析 / preflight / bwrap 沙箱 / Act 参数表 / dispatch），作为**单一事实源**。
+- `extensions/index.ts` 仅保留 pi 适配器壳（`pi.registerTool` / `pi.registerCommand`），行为等价，对外契约不变。
+- 新增 `extensions/server.mcp.ts`：MCP stdio server，暴露单端口 `vs` 工具，供 **Claude Code** 经 `claude mcp add` 接入。
+- 两个宿主共用同一份 25 个 action 与同一份 Python 传感器（**零改动**）；`vsParamType` / `VS_DESCRIPTION` 由核心导出，杜绝双份 schema。
+
+### ② 新增 check / setup 动作（双宿主对等）
+
+- `check`：只读环境自检；`setup`：安装（接 `setup_args`，如 `--with-omniparser`）。
+- Claude Code 侧等价于 pi 的 `/vs check` / `/vs setup`；两者结构一致。
+
+### ③ 工程化
+
+- `package.json`：`type: module`、`@modelcontextprotocol/sdk` 进 dependencies、`typebox` 由 peer→dependency；新增 `build` / `mcp` / `mcp:dev` 脚本。
+- 新增 `tsconfig.mcp.json`（仅编译 `extensions/`，不被 pi 框架误读）；新增 `docs/claude-code.md`。
+- `skills/vision-situation/SKILL.md` 改为主机无关（补 check/setup，修正 action 计数与 chart→chart_data）。
+
+> **非破坏性**：pi 侧入口、default export 签名、命令/工具注册方式全部保留；Python 传感器一行未改。
+
 ## 2.2.0 — 2026-08-29（真几何深度 + VLM 语义兜底 + 依赖健壮性）
 
 ### ① 真几何深度（depth_geom）

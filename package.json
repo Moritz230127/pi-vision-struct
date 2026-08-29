@@ -1,7 +1,8 @@
 {
   "name": "pi-vision-struct",
-  "version": "2.2.1",
-  "description": "Layered lossless vision for text-only models (DeepSeek etc.): L0 source (DOM/PPTX) + L1 deterministic measurement (color/OCR/diff/WCAG with exact numbers) + L2 opt-in semantics (local qwen3-vl) + deterministic fusion (crosscheck/audit/rules) + OmniParser icon structuring + CLIP clustering. All local, read-only, schema-driven (vision-report/v2).",
+  "version": "2.2.2",
+  "description": "Layered lossless vision for text-only models (DeepSeek etc.): L0 source (DOM/PPTX) + L1 deterministic measurement (color/OCR/diff/WCAG with exact numbers) + L2 opt-in semantics (local qwen3-vl) + deterministic fusion (crosscheck/audit/rules) + OmniParser icon structuring + CLIP clustering. Dual-host: pi-coding-agent (ExtensionAPI) + Claude Code (MCP). All local, read-only, schema-driven (vision-report/v3).",
+  "type": "module",
   "keywords": [
     "pi-package",
     "vision",
@@ -13,20 +14,26 @@
     "omniparser",
     "clip",
     "wcag",
-    "fusion"
+    "fusion",
+    "mcp",
+    "claude-code"
   ],
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Moritz230127/pi-vision-struct.git"
   },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "typebox": "^1.0.0"
+  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
-    "typebox": "*"
+    "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
     "@types/node": "^24",
+    "tsx": "^4",
     "typescript": "^5"
   },
   "files": [
@@ -40,8 +47,14 @@
     "!**/__pycache__/**",
     "!**/*.pyc",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "tsconfig.mcp.json"
   ],
+  "scripts": {
+    "build": "tsc -p tsconfig.mcp.json",
+    "mcp": "node dist/extensions/server.mcp.js",
+    "mcp:dev": "tsx extensions/server.mcp.ts"
+  },
   "pi": {
     "extensions": [
       "./extensions"

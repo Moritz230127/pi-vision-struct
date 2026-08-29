@@ -73,7 +73,7 @@ DeepSeek 在文本推理上是最强模型之一，它不需要别人替它"理�
 
 ## 二、架构
 
-### 2.1 单端口工具（22 动作，v1.0.0 为 20）
+### 2.1 单端口工具（25 动作，v1.0.0 为 20）
 
 全部能力收敛为单一注册工具 `vs`，`action` 枚举分发到内部分发表：
 
@@ -101,6 +101,18 @@ DeepSeek 在文本推理上是最强模型之一，它不需要别人替它"理�
 ### 2.4 扩展机制
 
 新增传感器 = 在对应分发表中加一行 `Act{script, timeout, build}` + 在 `vs` 工具的 `Type.Union` 中加一个 `Type.Literal`。无需注册新工具。
+
+### 2.5 双宿主接入（pi-coding-agent + Claude Code）
+
+代码已重架构为**双宿主一等扩展**：框架无关核心 `extensions/pi-vision-core.ts` 是唯一事实源，
+pi 与 Claude Code 各写一个薄适配器壳，复用同一份 25 个 action 与同一份 Python 传感器（零改动）。
+
+| 宿主 | 入口 | 接入方式 |
+|---|---|---|
+| **pi-coding-agent** | `extensions/index.ts`（`@earendil-works/pi-coding-agent` 的 `ExtensionAPI`） | `package.json` 的 `pi.extensions` 自动加载 |
+| **Claude Code** | `extensions/server.mcp.ts`（MCP stdio server） | `claude mcp add pi-vision-struct -- node dist/extensions/server.mcp.js` |
+
+详见 **[docs/claude-code.md](docs/claude-code.md)**。两个宿主下 `vs` 工具的 `action` 枚举、参数 schema、沙箱策略、preflight 完全一致。
 
 ---
 
