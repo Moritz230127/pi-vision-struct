@@ -18,8 +18,6 @@ from typing import Any, cast
 
 from PIL import Image, ImageStat  # type: ignore[import-not-found]
 
-import vs_semantic  # type: ignore[import-not-found]  # 本地模块：复用 classify()
-
 DEFAULT_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".bmp"]
 
 
@@ -170,15 +168,9 @@ def main() -> int:
             item = analyze_image(path, args.colors)
             item["file"] = path.name
             if args.semantic:
-                if len(items) >= args.semantic_max:
-                    item["semantic"] = None
-                else:
-                    res = vs_semantic.classify(str(path))
-                    if res.get("ok"):
-                        item["semantic"] = {"parsed": res.get("parsed"), "raw": res.get("raw", "")[:400]}
-                    else:
-                        semantic_failures += 1
-                        item["semantic"] = {"error": res.get("error", "unknown")}
+                # V3: vs_semantic 已移除（零其他模型约束）；semantic 功能废弃
+                item["semantic"] = {"error": "semantic 已废弃（v3.0.0 移除 L2 语义层）"}
+                semantic_failures += 1
             items.append(item)
 
         groups = {

@@ -169,6 +169,12 @@ def main() -> int:
                     ys = [p[1] for p in box]
                     ocr_bbox.append([min(xs), min(ys), max(xs), max(ys)])
                 ocr_text = [t for t in out.txts]
+        # 库 bug 规避：utils.py 空 ocr_bbox → None → zip 崩溃；且 remove_overlap_new
+        # 无 OCR 时 append 原始 list（后续 x['content'] 崩溃）。传 2px 占位 bbox
+        # （int_box_area 用 int() 截断，需 >1px 才保留），输出时过滤占位元素
+        if not ocr_bbox:
+            ocr_bbox = [[0, 0, 2, 2]]
+            ocr_text = [""]
 
         import contextlib
 
@@ -178,14 +184,15 @@ def main() -> int:
             som_model,
             BOX_TRESHOLD=args.box_threshold,
             output_coord_in_ratio=True,
-            ocr_bbox=ocr_bbox,
-            ocr_text=ocr_text,
+            ocr_bbox=ocr_bbox or [],
+            ocr_text=ocr_text or [],
             caption_model_processor=caption_processor,
             use_local_semantics=True,
             iou_threshold=0.7,
             scale_img=False,
             batch_size=64,
         )
+        parsed = parsed or []  # 无 OCR/无检测时可能为 None
 
         elements = []
         for i, item in enumerate(parsed[: args.max_items]):
@@ -194,6 +201,9 @@ def main() -> int:
                 continue
             bx = [round(float(bb[0]) * w), round(float(bb[1]) * h),
                   round(float(bb[2]) * w), round(float(bb[3]) * h)]
+            # 过滤 2px 占位元素（库 bug 规避的残留）
+            if (bx[2] - bx[0]) * (bx[3] - bx[1]) < 10:
+                continue
             elements.append({
                 "id": i, "type": item.get("type", "icon"), "bbox": bx,
                 "text": item.get("content"), "conf": None,

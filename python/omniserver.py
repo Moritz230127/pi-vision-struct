@@ -95,12 +95,18 @@ def parse_image(image_path: str, max_items: int, no_ocr: bool) -> dict:
                 ocr_bbox.append([min(xs), min(ys), max(xs), max(ys)])
             ocr_text = [t for t in out.txts]
     with contextlib.redirect_stdout(_sys.stderr):
+        # 库 bug 规避：空 ocr_bbox → None → zip 崩溃；无 OCR 时 remove_overlap_new
+        # append 原始 list。传 2px 占位（int_box_area 需 >1px），输出时过滤
+        if not ocr_bbox:
+            ocr_bbox = [[0, 0, 2, 2]]
+            ocr_text = [""]
         _, _, parsed = MODELS["get_som"](
             im, MODELS["yolo"], BOX_TRESHOLD=0.05, output_coord_in_ratio=True,
             ocr_bbox=ocr_bbox, ocr_text=ocr_text,
             caption_model_processor=MODELS["caption"],
             use_local_semantics=True, iou_threshold=0.7, scale_img=False,
             batch_size=32)
+    parsed = parsed or []
     w, h = im.size
     els = []
     for i, it in enumerate(parsed):
@@ -111,6 +117,9 @@ def parse_image(image_path: str, max_items: int, no_ocr: bool) -> dict:
             continue
         bx = [round(float(bb[0]) * w), round(float(bb[1]) * h),
               round(float(bb[2]) * w), round(float(bb[3]) * h)]
+        # 过滤 2px 占位元素（库 bug 规避的残留）
+        if (bx[2] - bx[0]) * (bx[3] - bx[1]) < 10:
+            continue
         els.append({"id": i, "type": it.get("type", "icon"),
                     "bbox": bx, "text": it.get("content"),
                     "conf": None, "color": None, "font": None, "z": None,
