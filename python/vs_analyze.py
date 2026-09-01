@@ -8,8 +8,7 @@
     {"as": "pix",  "cmd": ["vs_pix.py", "--image", "$INPUT"]},
     {"as": "ocr",  "cmd": ["vs_ocr.py", "--image", "$INPUT"]},
     {"as": "dom",  "cmd": ["vs_dom.py", "--url", "$URL"], "if": "$URL", "optional": true},
-    {"as": "fused","cmd": ["vs_crosscheck.py", "--image", "$INPUT", "--dom", "$dom",
-                            "--ocr", "$ocr", "--dpr", "$DPR"]}
+    {"as": "fused","cmd": ["vs_fusion.py", "--reports", "$pix", "$ocr"]}
   ],
   "report": "fused"
 }

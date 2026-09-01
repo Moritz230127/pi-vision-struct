@@ -2,7 +2,7 @@
 """vs_wall.py — 壁纸批量程序化分类（主色/亮度/饱和度）+ opt-in 语义标签。
 
 程序化维度全部确定性：色相族（主色直方图峰值）、亮度档、饱和度档、宽高比。
-语义标签（风格/主题）默认 opt-in：需显式 --semantic（内部走 vs_semantic，只连 localhost）。
+（v3.0.0 起 semantic 功能废弃，仅程序化分类）
 
 用法:
   vs_wall.py --dir PATH [--colors 5] [--max-files 200] [--ext png jpg jpeg webp]
