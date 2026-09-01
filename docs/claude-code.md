@@ -40,7 +40,7 @@ claude mcp add pi-vision-struct -- npx tsx /abs/path/to/pi-vision-struct/extensi
 
 ```bash
 claude mcp list              # 确认 pi-vision-struct 已连接（state: connected）
-claude mcp get pi-vision-struct   # tools/list 应返回 vs，action 含 24 项
+claude mcp get pi-vision-struct   # tools/list 应返回 vs，action 含 v3.0.0 动作集（含 saliency/segment/fusion/zoom/probe 等）
 ```
 
 之后在 Claude Code 内直接调用，例如：

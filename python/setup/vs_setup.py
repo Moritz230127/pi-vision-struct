@@ -94,12 +94,13 @@ def detect_capture() -> str:
         return "none"
 
 
-def write_config(pi_py: Path, omni_py: Path, envs: Path) -> None:
+def write_config(pi_py: Path, omni_py: Path, vsensor_py: Path, envs: Path) -> None:
     """写入跨平台配置（扩展启动时读取）。"""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     cfg = {
         "pi_vision_python": str(pi_py),
         "omniparser_python": str(omni_py),
+        "vsensor_python": str(vsensor_py),
         "envs_dir": str(envs),
         "sandbox_enabled": (not IS_WIN and shutil.which("bwrap") is not None),
         "capture_backend": detect_capture(),
@@ -189,12 +190,14 @@ def main() -> int:
     envs = Path(args.envs_dir)
     py = env_python(envs, "pi-vision")
     omni_py = env_python(envs, "omniparser")
+    vsensor_py = env_python(envs, "vsensor")
     env = base_env(envs)
 
     if args.check:
         # ---- 只读深度健康检查（env + 模型 + 沙箱 + Ollama + daemon）----
         core_ok = all(check_env(py, m) for m in ("PIL", "numpy", "onnxruntime", "rapidocr", "pptx"))
         omni_ok = all(check_env(omni_py, m) for m in ("torch", "transformers", "ultralytics"))
+        vsensor_ok = all(check_env(vsensor_py, m) for m in ("torch", "skimage", "onnxruntime", "vtracer"))
 
         def exists(p: Path) -> bool:
             return p.exists()
@@ -210,28 +213,20 @@ def main() -> int:
         }
         daemon_sock = exists(omni_home / "omniserver.sock")
         bwrap_ok = shutil.which("bwrap") is not None
-        ollama_ok = False
-        try:
-            import urllib.request
-
-            with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=2) as r:
-                ollama_ok = "qwen3-vl:8b" in r.read().decode("utf-8", "ignore")
-        except Exception:
-            ollama_ok = False
         report = {
             "ok": True, "mode": "check",
             "conda": conda, "envs_dir": str(envs),
             "envs": {
                 "pi-vision": {"exists": py.exists(), "complete": core_ok},
                 "omniparser": {"exists": omni_py.exists(), "complete": omni_ok},
+                "vsensor": {"exists": vsensor_py.exists(), "complete": vsensor_ok},
             },
             "models": models,
             "sandbox": {"bwrap": bwrap_ok},
-            "ollama": {"qwen3_vl": ollama_ok},
             "daemon": {"socket": daemon_sock},
             "a11y": check_a11y(),
             "steps": [{"name": "health_check", "status": "ok",
-                        "detail": f"core={'完整' if core_ok else '缺失'} omni={'完整' if omni_ok else '缺失'}"}],
+                        "detail": f"core={'完整' if core_ok else '缺失'} omni={'完整' if omni_ok else '缺失'} vsensor={'完整' if vsensor_ok else '缺失'}"}],
         }
         print(json.dumps(report, ensure_ascii=False))
         return 0
@@ -287,7 +282,7 @@ def main() -> int:
 
     ok = all(s["status"] == "ok" for s in steps)
     if ok and not args.dry_run:
-        write_config(py, omni_py, envs)
+        write_config(py, omni_py, vsensor_py, envs)
     print(json.dumps({
         "ok": ok, "mode": "setup",
         "conda": conda, "envs_dir": str(envs), "dry_run": args.dry_run,

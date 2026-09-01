@@ -1,7 +1,7 @@
 {
   "name": "pi-vision-struct",
   "version": "3.0.0",
-  "description": "Layered lossless vision for text-only models (DeepSeek etc.): L0 source (DOM/PPTX) + L1 deterministic measurement (color/OCR/diff/WCAG with exact numbers) + L2 opt-in semantics (local qwen3-vl) + deterministic fusion (crosscheck/audit/rules) + OmniParser icon structuring + CLIP clustering. Dual-host: pi-coding-agent (ExtensionAPI) + Claude Code (MCP). All local, read-only, schema-driven (vision-report/v3).",
+  "description": "Layered lossless vision for text-only models (DeepSeek-V4-Flash etc.): L0 source (DOM/PPTX/PDF) + L1 deterministic measurement (SLIC color/OCR+dict-correct/edge subpixel/ASCII/geometry) + L2 lightweight DL sensors (U²-Net saliency / MobileSAM segment / MiDaS depth, ≤25M params, GPU) + F1 D-S evidence fusion (belief/plausibility/uncertainty) + F2 multi-round protocol (analyze/zoom/probe). Zero third-party API, zero other models. Scheduler (vsched): VRAM budget + concurrency + power-aware. Dual-host: pi-coding-agent (ExtensionAPI) + Claude Code (MCP). All local, read-only, schema-driven (vision-report/v3).",
   "type": "module",
   "keywords": [
     "pi-package",
