@@ -192,7 +192,7 @@ class Scheduler:
         """LRU 淘汰：卸载最久未用的模型腾显存。"""
         if not self._loaded:
             return
-        for model in sorted(self._loaded, key=self._loaded.get):
+        for model in sorted(self._loaded, key=lambda m: self._loaded.get(m, 0.0)):
             budget = MODEL_BUDGETS.get(model, {"vram_reserve": 0.5})
             self._vram_used -= budget.get("vram_reserve", 0.5)
             del self._loaded[model]

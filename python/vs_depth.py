@@ -41,7 +41,7 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
-        import onnxruntime as ort
+        import onnxruntime as ort  # type: ignore[import-not-found]
         import numpy as np
         from PIL import Image
 
@@ -58,7 +58,7 @@ def main() -> int:
         im = Image.open(args.image).convert("RGB")
         w, h = im.size
         # MiDaS 归一化（ImageNet）
-        im_resized = im.resize((256, 256), Image.LANCZOS)
+        im_resized = im.resize((256, 256), Image.Resampling.LANCZOS)
         arr = np.array(im_resized, dtype=np.float32) / 255.0
         mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
         std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
@@ -70,7 +70,7 @@ def main() -> int:
 
         # 上采样回原图
         depth_img = Image.fromarray(((depth - depth.min()) / (depth.max() - depth.min() + 1e-9) * 255).astype(np.uint8))
-        depth_full = np.array(depth_img.resize((w, h), Image.BILINEAR), dtype=np.float32) / 255.0
+        depth_full = np.array(depth_img.resize((w, h), Image.Resampling.BILINEAR), dtype=np.float32) / 255.0
 
         # 全局深度统计
         def depth_stats(d: np.ndarray) -> dict:

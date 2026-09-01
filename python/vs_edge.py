@@ -25,7 +25,7 @@ def devernay_subpixel(gray: np.ndarray, sigma: float = 1.0) -> np.ndarray:
 
     返回亚像素边缘点 (N, 2) 数组（x, y 浮点坐标）。
     """
-    from scipy import ndimage
+    from scipy import ndimage  # type: ignore[import-not-found]
 
     # 高斯平滑
     g = ndimage.gaussian_filter(gray.astype(np.float64), sigma)

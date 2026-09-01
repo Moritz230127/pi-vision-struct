@@ -47,7 +47,7 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
-        import onnxruntime as ort
+        import onnxruntime as ort  # type: ignore[import-not-found]
         import numpy as np
         from PIL import Image
 
@@ -65,7 +65,7 @@ def main() -> int:
         im = Image.open(args.image).convert("RGB")
         w, h = im.size
         # 缩放到 320×320（U²-Net 标准输入）
-        im_resized = im.resize((320, 320), Image.LANCZOS)
+        im_resized = im.resize((320, 320), Image.Resampling.LANCZOS)
         arr = np.array(im_resized, dtype=np.float32) / 255.0
         # 归一化（ImageNet 均值/方差）
         mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -83,10 +83,10 @@ def main() -> int:
 
         # 上采样回原图尺寸
         sal_img = Image.fromarray((sal_map * 255).astype(np.uint8))
-        sal_full = np.array(sal_img.resize((w, h), Image.BILINEAR), dtype=np.float32) / 255.0
+        sal_full = np.array(sal_img.resize((w, h), Image.Resampling.BILINEAR), dtype=np.float32) / 255.0
 
         # 连通域提取候选区域
-        from scipy import ndimage
+        from scipy import ndimage  # type: ignore[import-not-found]
         binary = sal_full > args.min_score
         labeled, n = ndimage.label(binary)
         candidates = []

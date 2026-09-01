@@ -28,10 +28,10 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
-        import torch
+        import torch  # type: ignore[import-not-found]
         import numpy as np
         from PIL import Image
-        from mobile_sam import sam_model_registry, SamPredictor
+        from mobile_sam import sam_model_registry, SamPredictor  # type: ignore[import-not-found]
 
         device = args.device if (args.device == "cuda" and torch.cuda.is_available()) else "cpu"
         model = sam_model_registry["vit_t"](checkpoint=WEIGHTS)

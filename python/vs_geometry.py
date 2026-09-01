@@ -119,7 +119,7 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
-        import vtracer
+        import vtracer  # type: ignore[import-not-found]
         from PIL import Image
         im = Image.open(args.image).convert("RGB")
         w, h = im.size
@@ -156,7 +156,7 @@ def main() -> int:
 def _vtracer_bytes(im, mode: str) -> str:
     """PIL 图像 → VTracer SVG（bytes 路径）。"""
     import io
-    import vtracer
+    import vtracer  # type: ignore[import-not-found]
     buf = io.BytesIO()
     im.save(buf, format="PNG")
     return vtracer.convert_raw_image_to_svg(buf.getvalue(), img_format="png",

@@ -248,11 +248,6 @@ interface Act {
 	sandbox?: boolean; // 默认 true（bwrap 隔离）; false = 豁免（见上）
 }
 
-function num(p: Record<string, string>, k: string): string[] {
-	const v = p[k];
-	return v === undefined ? [] : [String(v)];
-}
-
 function flag(p: Record<string, string>, k: string, flagName: string): string[] {
 	const v = p[k];
 	return v === undefined ? [] : [flagName, String(v)];

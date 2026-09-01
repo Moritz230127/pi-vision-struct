@@ -158,7 +158,7 @@ def hungarian_match(boxes_a: list[list[float]], boxes_b: list[list[float]],
     代价 C[i][j] = 1 - IoU(box_i, box_j) - α·text_sim(i, j)
     返回 [(i, j, iou), ...]（仅 IoU > 0 的匹配对）。
     """
-    from scipy.optimize import linear_sum_assignment
+    from scipy.optimize import linear_sum_assignment  # type: ignore[import-not-found]
 
     n, m = len(boxes_a), len(boxes_b)
     if n == 0 or m == 0:
@@ -169,7 +169,7 @@ def hungarian_match(boxes_a: list[list[float]], boxes_b: list[list[float]],
             iou = S.bbox_iou(boxes_a[i], boxes_b[j])
             sim = 0.0
             if texts_a and texts_b and texts_a[i] and texts_b[j]:
-                sim = _text_sim(texts_a[i], texts_b[j])
+                sim = _text_sim(str(texts_a[i]), str(texts_b[j]))
             cost[i][j] = 1.0 - iou - alpha * sim
     row_idx, col_idx = linear_sum_assignment(cost)
     pairs = []
