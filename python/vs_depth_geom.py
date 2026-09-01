@@ -200,7 +200,7 @@ def main():
     hist, edges = np.histogram(nz, bins=10, range=(0.0, 1.0))
 
     result = {
-        "schema": "vision-report/v2",
+        "schema": "vision-report/v3",
         "task": "depth",
         "sensors": ["bpy-geometry"],
         "coordsys": "world_m",

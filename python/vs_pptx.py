@@ -92,7 +92,7 @@ def main() -> int:
                 total += 1
             slides_out.append({"slide": idx, "shapes": shapes, "shape_count": len(shapes)})
         print(S.dump_json({
-            "schema": "vision-report/v2", "task": "pptx", "sensors": ["pptx"],
+            "schema": "vision-report/v3", "task": "pptx", "sensors": ["pptx"],
             "coordsys": "pt",
             "source": {"type": "pptx", "path": args.file,
                        "slide_size_pt": [(prs.slide_width or 0) / 12700.0, (prs.slide_height or 0) / 12700.0],

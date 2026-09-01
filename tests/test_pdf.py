@@ -48,7 +48,7 @@ def test_pdf() -> None:
                         "--render-dir", str(OUT / "pdf_render")],
                        capture_output=True, text=True, timeout=120)
     d = json.loads(r.stdout)
-    check("schema v2 + task=pdf", d.get("schema") == "vision-report/v2" and d.get("task") == "pdf")
+    check("schema v2 + task=pdf", d.get("schema") == "vision-report/v3" and d.get("task") == "pdf")
     check("coordsys=pt", d.get("coordsys") == "pt")
     check("page_size A4 pt", d["source"]["page_size_pt"] == [595.0, 842.0])
     texts = [e["text"] for e in d["elements"]]

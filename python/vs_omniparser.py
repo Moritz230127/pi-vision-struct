@@ -203,7 +203,7 @@ def main() -> int:
             })
 
         print(json.dumps({
-            "schema": "vision-report/v2", "task": "omniparser", "sensors": ["omniparser"],
+            "schema": "vision-report/v3", "task": "omniparser", "sensors": ["omniparser"],
             "coordsys": "image_px",
             "source": {"type": "image", "path": args.image, "size_px": [w, h],
                        "engine": "OmniParser-v2", "box_threshold": args.box_threshold},

@@ -1,154 +1,136 @@
 #!/usr/bin/env python3
-"""test_fusion.py — 融合层自测：crosscheck / audit / analyze 引擎。
+"""test_fusion.py — V3 融合引擎单元测试（S1 门禁印证）。
 
-运行（conda env）:
-  /home/Arch/conda-envs/pi-vision/bin/python tests/test_fusion.py
+覆盖：
+  S1-1 D-S 组合数学正确性（手算期望值）
+  S1-2 匈牙利匹配全局最优（无重复）
+  S1-3 冲突处理（K>0.7 → needs_review）
+  S1-5 确定性（同输入两次运行输出一致）
 """
 import json
-import subprocess
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw  # type: ignore[import-not-found]
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
-ROOT = Path(__file__).resolve().parent.parent
-PY = ROOT / "python"
-OUT = ROOT / "tests" / "_out"
-OUT.mkdir(parents=True, exist_ok=True)
-PYBIN = "/home/Arch/conda-envs/pi-vision/bin/python"
-
-PASS = 0
-FAIL = 0
+import vs_fusion as F
 
 
-def run_tool(script: str, args: list[str]) -> dict:
-    r = subprocess.run([PYBIN, str(PY / script), *args], capture_output=True, text=True, timeout=180)
-    if r.returncode != 0:
-        raise AssertionError(f"tool exit {r.returncode}: {r.stdout[:300]} {r.stderr[:200]}")
-    try:
-        return json.loads(r.stdout)
-    except ValueError as e:
-        raise AssertionError(f"bad JSON from {script}: {r.stdout[:200]}") from e
+def test_ds_combine_math():
+    """S1-1: 已知 mass 输入 → 手算期望输出一致。"""
+    m1 = {F.CONSISTENT: 0.6, F.CONFLICT: 0.1, F.UNCERTAIN: 0.3}
+    m2 = {F.CONSISTENT: 0.7, F.CONFLICT: 0.0, F.UNCERTAIN: 0.3}
+    r = F.ds_combine(m1, m2)
+    # 手算: K=0.07; m_cons=0.81/0.93=0.871; m_conf=0.03/0.93=0.0323; m_unc=0.09/0.93=0.0968
+    assert abs(r[F.CONSISTENT] - 0.871) < 0.01
+    assert abs(r[F.CONFLICT] - 0.0323) < 0.01
+    assert abs(r[F.UNCERTAIN] - 0.0968) < 0.01
 
 
-def check(name: str, cond: bool, detail: str = "") -> None:
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print(f"  ✓ {name}")
-    else:
-        FAIL += 1
-        print(f"  ✗ {name} {detail}")
+def test_ds_combine_identity():
+    """全不确定与任何 mass 组合 → 原 mass（单位元）。"""
+    m = {F.CONSISTENT: 0.8, F.CONFLICT: 0.1, F.UNCERTAIN: 0.1}
+    u = {F.CONSISTENT: 0.0, F.CONFLICT: 0.0, F.UNCERTAIN: 1.0}
+    r = F.ds_combine(m, u)
+    assert abs(r[F.CONSISTENT] - 0.8) < 1e-9
+    assert abs(r[F.CONFLICT] - 0.1) < 1e-9
+    assert abs(r[F.UNCERTAIN] - 0.1) < 1e-9
 
 
-def make_scene() -> tuple[Path, Path]:
-    """合成场景：DOM 声明色 vs 实际渲染色不一致 + 一个 DOM 有文本但渲染为空白。"""
-    from PIL import ImageFont  # type: ignore[import-not-found]
-
-    try:
-        f18 = ImageFont.truetype("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", 18)
-    except OSError:
-        f18 = ImageFont.load_default()
-    W, H = 500, 300
-    im = Image.new("RGB", (W, H), (255, 255, 255))
-    d = ImageDraw.Draw(im)
-    # 区域1：DOM 说 #111111（近黑），实际渲染成红色 → 颜色漂移
-    d.rectangle([100, 50, 300, 80], fill=(255, 255, 255))
-    d.text((100, 50), "标题测试", fill=(224, 0, 0), font=f18)
-    # 区域2：DOM 有文本，渲染为空白 → 文本缺失（渲染失败）
-    d.rectangle([100, 100, 300, 130], fill=(255, 255, 255))
-    # 区域3：正常元素（DOM 与渲染一致），作对照
-    d.rectangle([100, 160, 260, 190], fill=(255, 255, 255))
-    d.text((100, 160), "正常元素", fill=(17, 17, 17), font=f18)
-    img = OUT / "scene.png"
-    im.save(img)
-
-    dom = {
-        "schema": "vision-report/v2", "task": "dom", "coordsys": "css_px",
-        "source": {"dpr": 1.0},
-        "elements": [
-            {"id": 0, "type": "h1", "bbox": [100, 50, 300, 80], "text": "标题测试",
-             "color": {"fill": "#FFFFFF", "text": "#111111"}, "source": ["dom"], "coordsys": "css_px"},
-            {"id": 1, "type": "div", "bbox": [100, 100, 300, 130], "text": "canvas文本",
-             "color": {"fill": "#FFFFFF", "text": "#222222"}, "source": ["dom"], "coordsys": "css_px"},
-            {"id": 2, "type": "p", "bbox": [100, 160, 260, 190], "text": "正常元素",
-             "color": {"fill": "#FFFFFF", "text": "#111111"}, "source": ["dom"], "coordsys": "css_px"},
-        ],
-    }
-    dom_f = OUT / "scene_dom.json"
-    dom_f.write_text(json.dumps(dom), encoding="utf-8")
-    return img, dom_f
+def test_ds_combine_total_conflict():
+    """完全冲突 → 全不确定（防除零）。"""
+    m1 = {F.CONSISTENT: 1.0, F.CONFLICT: 0.0, F.UNCERTAIN: 0.0}
+    m2 = {F.CONSISTENT: 0.0, F.CONFLICT: 1.0, F.UNCERTAIN: 0.0}
+    r = F.ds_combine(m1, m2)
+    assert r[F.UNCERTAIN] == 1.0
 
 
-def test_crosscheck() -> None:
-    print("[vs_crosscheck] 三方互验")
-    img, dom_f = make_scene()
-    ocr = run_tool("vs_ocr.py", ["--image", str(img), "--max-items", "20"])
-    ocr_f = OUT / "scene_ocr.json"
-    ocr_f.write_text(json.dumps(ocr), encoding="utf-8")
-
-    d = run_tool("vs_crosscheck.py", ["--image", str(img), "--dom", str(dom_f),
-                                      "--ocr", str(ocr_f), "--dpr", "1.0", "--color-threshold", "5.0"])
-    types = [a["type"] for a in d["anomalies"]]
-    drift = next((a for a in d["anomalies"] if a["type"] == "color_drift"), None)
-    missing = next((a for a in d["anomalies"] if a["type"] == "text_missing_in_ocr"), None)
-    check("检出颜色漂移（标题：声明 #111111 vs 实测红）",
-          drift is not None and drift["evidence"]["dom_color"] == "#111111"
-          and drift["evidence"]["delta_e76"] > 20, str(drift))
-    check("检出文本缺失（canvas 区渲染为空白）",
-          missing is not None and "canvas文本" in missing["evidence"]["dom_text"], str(missing))
-    check("无多余噪音（anomaly ≤ 3）", len(d["anomalies"]) <= 3, str(types))
+def test_hungarian_no_duplicate():
+    """S1-2: 合成 10 对 bbox → 全局最优匹配（无重复）。"""
+    boxes_a = [[i * 100, 0, i * 100 + 50, 50] for i in range(10)]
+    boxes_b = [[i * 100 + 2, 2, i * 100 + 52, 52] for i in range(10)]
+    pairs = F.hungarian_match(boxes_a, boxes_b)
+    assert len(pairs) == 10
+    ia = [p[0] for p in pairs]
+    ib = [p[1] for p in pairs]
+    assert len(set(ia)) == 10 and len(set(ib)) == 10
+    assert all(p[2] > 0.8 for p in pairs)
 
 
-def test_audit() -> None:
-    print("[vs_audit] 元素审计")
-    from pptx import Presentation  # type: ignore[import-not-found]
-    from pptx.dml.color import RGBColor
-    from pptx.enum.shapes import MSO_SHAPE  # type: ignore[import-not-found]
-    from pptx.util import Inches
-
-    prs = Presentation()
-    s = prs.slides.add_slide(prs.slide_layouts[6])
-    a = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(1), Inches(1), Inches(3), Inches(2))
-    a.fill.solid(); a.fill.fore_color.rgb = RGBColor(0x22, 0x78, 0xD2)
-    b = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(3), Inches(2), Inches(2), Inches(2))
-    b.fill.solid(); b.fill.fore_color.rgb = RGBColor(0xFF, 0x6B, 0x6B)
-    off = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(-2), Inches(0.5), Inches(2), Inches(1))
-    off.fill.solid(); off.fill.fore_color.rgb = RGBColor(0x44, 0x44, 0x44)
-    tb = s.shapes.add_textbox(Inches(1), Inches(5), Inches(4), Inches(1))
-    tb.text_frame.text = "白字浅底"
-    tb.text_frame.paragraphs[0].runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-    tb.fill.solid(); tb.fill.fore_color.rgb = RGBColor(0xFF, 0xFF, 0xEE)
-    fx = OUT / "audit_fixture.pptx"
-    prs.save(str(fx))
-
-    pptx_report = run_tool("vs_pptx.py", ["--file", str(fx)])
-    report_f = OUT / "audit_pptx.json"
-    report_f.write_text(json.dumps(pptx_report), encoding="utf-8")
-    d = run_tool("vs_audit.py", ["--report", str(report_f), "--canvas", "720x540"])
-    types = {a["type"] for a in d["anomalies"]}
-    check("检出元素重叠", "element_overlap" in types, str(types))
-    check("检出出界元素（负坐标）", "off_canvas" in types, str(types))
-    check("检出对比度不达标（白字浅底）", "contrast_fail" in types, str(types))
+def test_hungarian_crossing():
+    """交叉 bbox：匈牙利应给出全局最优而非贪心。"""
+    # A0 与 B1 更近，A1 与 B0 更近（交叉）
+    boxes_a = [[0, 0, 10, 10], [100, 0, 110, 10]]
+    boxes_b = [[100, 0, 110, 10], [0, 0, 10, 10]]
+    pairs = F.hungarian_match(boxes_a, boxes_b)
+    # 全局最优：A0-B1, A1-B0（IoU=1.0）
+    assert (0, 1) in [(p[0], p[1]) for p in pairs]
+    assert (1, 0) in [(p[0], p[1]) for p in pairs]
 
 
-def test_analyze() -> None:
-    print("[vs_analyze] 任务引擎（audit-pptx 配置）")
-    d = run_tool("vs_analyze.py", ["--task", "audit-pptx",
-                                   "--input", str(OUT / "audit_fixture.pptx")])
-    check("报告为 schema v2 融合输出", d.get("schema") == "vision-report/v2" and "anomalies" in d, str(d)[:80])
-    types = {a["type"] for a in d.get("anomalies", [])}
-    check("引擎产出重叠/出界/对比度三类缺陷", {"element_overlap", "off_canvas", "contrast_fail"} <= types, str(types))
+def test_conflict_needs_review():
+    """S1-3: K>0.7 → needs_review 而非误报。"""
+    m3 = {F.CONSISTENT: 0.9, F.CONFLICT: 0.1, F.UNCERTAIN: 0.0}
+    m4 = {F.CONSISTENT: 0.1, F.CONFLICT: 0.9, F.UNCERTAIN: 0.0}
+    k = F._conflict_coef([m3, m4])
+    assert k > 0.7
+    bel, pla = F.belief_plausibility(F.ds_combine(m3, m4))
+    v = F.decide(bel, pla, k)
+    assert v == "needs_review"
 
 
-def main() -> int:
-    print(f"fusion self-tests (python {sys.version.split()[0]})\n")
-    test_crosscheck()
-    test_audit()
-    test_analyze()
-    print(f"\n结果: {PASS} 通过 / {FAIL} 失败")
-    return 1 if FAIL else 0
+def test_verdict_confirmed():
+    """高一致证据 → confirmed。"""
+    m = F.ds_combine_all([
+        {F.CONSISTENT: 0.8, F.CONFLICT: 0.0, F.UNCERTAIN: 0.2},
+        {F.CONSISTENT: 0.7, F.CONFLICT: 0.0, F.UNCERTAIN: 0.3},
+    ])
+    bel, pla = F.belief_plausibility(m)
+    v = F.decide(bel, pla, 0.0)
+    assert v == "confirmed"
+
+
+def test_determinism():
+    """S1-5: 同输入两次运行输出一致。"""
+    els = [
+        {"id": 0, "type": "text", "bbox": [0, 0, 50, 50], "text": "hello",
+         "conf": 0.9, "source": ["ocr"]},
+        {"id": 1, "type": "text", "bbox": [2, 2, 52, 52], "text": "hello",
+         "conf": 0.8, "source": ["dom"]},
+    ]
+    f1 = F.fuse_elements(els)
+    f2 = F.fuse_elements(els)
+    assert json.dumps(f1, sort_keys=True) == json.dumps(f2, sort_keys=True)
+
+
+def test_mass_factories():
+    """mass 映射表：各传感器工厂输出合法。"""
+    assert abs(F.mass_from_ocr(0.9)[F.CONSISTENT] - 0.72) < 1e-9
+    assert F.mass_from_color_delta(0.0)[F.CONSISTENT] == 1.0
+    assert F.mass_from_color_delta(100.0)[F.CONSISTENT] < 0.01
+    assert F.mass_from_detect(0.5)[F.CONSISTENT] == 0.5
+    assert F.mass_from_segment(0.5)[F.CONSISTENT] == 1.0
+    assert F.mass_from_saliency(0.8)[F.CONSISTENT] == 0.8
+    assert F.mass_from_depth(0.0)[F.CONSISTENT] == 1.0
+
+
+def test_text_sim():
+    """文本相似度：精确/包含/编辑距离。"""
+    assert F._text_sim("hello", "hello") == 1.0
+    assert F._text_sim("hello", "hello world") == 0.7
+    assert F._text_sim("hello", "hallo") > 0.5
+    assert F._text_sim("", "x") == 0.0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    passed = 0
+    for t in tests:
+        try:
+            t()
+            print(f"  PASS {t.__name__}")
+            passed += 1
+        except AssertionError as e:
+            print(f"  FAIL {t.__name__}: {e}")
+    print(f"\n{passed}/{len(tests)} passed")
+    sys.exit(0 if passed == len(tests) else 1)

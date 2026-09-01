@@ -52,18 +52,20 @@ def color_histogram(im: Image.Image, n_colors: int) -> list[dict]:
 
 
 def area_ratios(im: Image.Image) -> dict:
-    """基于亮度阈值的前景/背景面积比"""
-    gray = im.convert("L")
-    arr = np.array(gray)
-    total = arr.size
-    # Otsu-like: use median as threshold
-    threshold = int(np.median(arr))
-    foreground = int(np.sum(arr < threshold))
+    """基于 Otsu 阈值的前景/背景面积比（替代 median 伪 Otsu）。"""
+    import numpy as np
+    from skimage.filters import threshold_otsu
+
+    gray = np.array(im.convert("L"))
+    total = gray.size
+    threshold = float(threshold_otsu(gray))
+    foreground = int(np.sum(gray < threshold))
     background = total - foreground
     return {
         "foreground_ratio": round(foreground / total, 4),
         "background_ratio": round(background / total, 4),
-        "threshold": threshold,
+        "threshold": round(threshold, 1),
+        "method": "otsu",
     }
 
 

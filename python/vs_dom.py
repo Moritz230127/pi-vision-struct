@@ -118,7 +118,7 @@ def main() -> int:
             })
 
         print(S.dump_json({
-            "schema": "vision-report/v2",
+            "schema": "vision-report/v3",
             "task": "dom",
             "sensors": ["dom"],
             "coordsys": "css_px",

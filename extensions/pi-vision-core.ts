@@ -70,7 +70,9 @@ function candidatePython(envName: string): string[] {
 function resolvePython(envName: string, envVar: string): string {
 	if (process.env[envVar]) return process.env[envVar]!;
 	const cfg = readConfig();
-	const key = envName === "pi-vision" ? "pi_vision_python" : "omniparser_python";
+	const key = envName === "pi-vision" ? "pi_vision_python"
+		: envName === "vsensor" ? "vsensor_python"
+		: "omniparser_python";
 	if (cfg[key] && existsSync(cfg[key]!)) return cfg[key]!;
 	for (const c of candidatePython(envName)) {
 		if (existsSync(c)) return c;
@@ -80,6 +82,7 @@ function resolvePython(envName: string, envVar: string): string {
 
 const DEFAULT_PYTHON = resolvePython("pi-vision", "PI_VISION_PYTHON");
 const OMNI_PYTHON = resolvePython("omniparser", "PI_VISION_OMNI_PYTHON");
+const VSENSOR_PYTHON = resolvePython("vsensor", "PI_VISION_VSENSOR_PYTHON");
 // Linux 且 bwrap 存在且未禁用 → 沙箱；其他平台自动降级为无沙箱
 const SANDBOX_ENABLED =
 	process.platform === "linux" &&
@@ -312,17 +315,6 @@ const MEASURE: Record<string, Act> = {
 			...flag(p, "daemon", "--daemon"),
 		],
 	},
-	chart_data: {
-		script: "vs_chart.py",
-		sandbox: false,
-		timeout: T.vlm,
-		build: (p) => [
-			...flag(p, "image", "--image"),
-			...flag(p, "region", "--region"),
-			...flag(p, "prompt", "--prompt"),
-			...on(p, "enable", "--enable"),
-		],
-	},
 	wallpaper: {
 		script: "vs_wall.py",
 		timeout: T.doc,
@@ -447,17 +439,6 @@ const FUSE: Record<string, Act> = {
 			...flag(p, "prompt", "--prompt"),
 		],
 	},
-	crosscheck: {
-		script: "vs_crosscheck.py",
-		timeout: T.normal,
-		build: (p) => [
-			...flag(p, "image", "--image"),
-			...flag(p, "dom", "--dom"),
-			...flag(p, "ocr", "--ocr"),
-			...flag(p, "dpr", "--dpr"),
-			...flag(p, "color_threshold", "--color-threshold"),
-		],
-	},
 	audit: {
 		script: "vs_audit.py",
 		timeout: T.short,
@@ -486,15 +467,88 @@ const FUSE: Record<string, Act> = {
 			...on(p, "method", "--method"),
 		],
 	},
-	// 可选 VLM 语义兜底：不进入数值主链；sandbox=false（宿主 Ollama 127.0.0.1 硬编码）
-	semantic: {
-		script: "vs_semantic_v2.py",
-		sandbox: false,
-		timeout: T.vlm,
+	saliency: {
+		script: "vs_saliency.py",
+		bin: VSENSOR_PYTHON,
+		timeout: T.normal,
 		build: (p) => [
 			...flag(p, "image", "--image"),
-			...flag(p, "prompt", "--prompt"),
-			...flag(p, "model", "--model"),
+			...flag(p, "top_n", "--top-n"),
+			...flag(p, "min_score", "--min-score"),
+			...flag(p, "device", "--device"),
+		],
+	},
+	segment: {
+		script: "vs_segment.py",
+		bin: VSENSOR_PYTHON,
+		timeout: T.normal,
+		build: (p) => [
+			...flag(p, "image", "--image"),
+			...flag(p, "saliency", "--saliency"),
+			...flag(p, "device", "--device"),
+		],
+	},
+	depth_midas: {
+		script: "vs_depth.py",
+		bin: VSENSOR_PYTHON,
+		timeout: T.normal,
+		build: (p) => [
+			...flag(p, "image", "--image"),
+			...flag(p, "region", "--region"),
+			...flag(p, "device", "--device"),
+		],
+	},
+	edge: {
+		script: "vs_edge.py",
+		timeout: T.normal,
+		build: (p) => [
+			...flag(p, "image", "--image"),
+			...flag(p, "max_lines", "--max-lines"),
+		],
+	},
+	ascii: {
+		script: "vs_ascii.py",
+		timeout: T.short,
+		build: (p) => [
+			...flag(p, "image", "--image"),
+			...flag(p, "cols", "--cols"),
+			...flag(p, "rows", "--rows"),
+			...on(p, "color", "--color"),
+		],
+	},
+	geometry: {
+		script: "vs_geometry.py",
+		bin: VSENSOR_PYTHON,
+		timeout: T.normal,
+		build: (p) => [
+			...flag(p, "image", "--image"),
+			...flag(p, "max_shapes", "--max-shapes"),
+		],
+	},
+	fusion: {
+		script: "vs_fusion.py",
+		timeout: T.short,
+		build: (p) => [
+			...flag(p, "reports", "--reports"),
+		],
+	},
+	zoom: {
+		script: "vs_protocol.py",
+		timeout: T.normal,
+		build: (p) => [
+			"zoom",
+			...flag(p, "image", "--image"),
+			...flag(p, "region", "--region"),
+		],
+	},
+	probe: {
+		script: "vs_protocol.py",
+		timeout: T.normal,
+		build: (p) => [
+			"probe",
+			...flag(p, "image", "--image"),
+			...flag(p, "bbox", "--bbox"),
+			...flag(p, "sensor", "--sensor"),
 		],
 	},
 	blender_dump: {
@@ -632,7 +686,7 @@ async function gitIntegrity(): Promise<string> {
 
 // ---------- 导出（双宿主共用）----------
 
-export { PKG_ROOT, PY, DEFAULT_PYTHON, OMNI_PYTHON, SANDBOX_ENABLED, BWRAP };
+export { PKG_ROOT, PY, DEFAULT_PYTHON, OMNI_PYTHON, VSENSOR_PYTHON, SANDBOX_ENABLED, BWRAP };
 export { runPython, gitIntegrity, preflight, resolvePython };
 export { dispatch };
 export { T };
@@ -648,11 +702,13 @@ export const vsParamType = Type.Object({
 		Type.Literal("wallpaper"), Type.Literal("scene_stats"), Type.Literal("env"),
 		Type.Literal("dom"), Type.Literal("pptx"), Type.Literal("omniparser"),
 		Type.Literal("layout"), Type.Literal("pdf"), Type.Literal("a11y"),
-		Type.Literal("analyze"), Type.Literal("crosscheck"), Type.Literal("audit"),
+		Type.Literal("analyze"), Type.Literal("audit"),
 		Type.Literal("rules"), Type.Literal("cluster"),
-		Type.Literal("detect"), Type.Literal("chart_data"),
-		Type.Literal("blender_dump"), Type.Literal("depth"), Type.Literal("audit3d"),
-		Type.Literal("semantic"),
+		Type.Literal("detect"),
+		Type.Literal("blender_dump"), Type.Literal("depth"), Type.Literal("depth_midas"), Type.Literal("audit3d"),
+		Type.Literal("saliency"), Type.Literal("segment"), Type.Literal("edge"),
+		Type.Literal("ascii"), Type.Literal("geometry"), Type.Literal("fusion"),
+		Type.Literal("zoom"), Type.Literal("probe"),
 		Type.Literal("check"), Type.Literal("setup"),
 	]),
 	out: Type.Optional(Type.String({ description: "截屏输出路径（capture）" })),

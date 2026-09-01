@@ -120,7 +120,7 @@ def main() -> int:
 
         # 合并所有步骤输出为统一融合报告（sensor 数据 + 融合异常全部可见）
         merged: dict[str, Any] = {
-            "schema": "vision-report/v2", "task": cfg.get("name") or args.task,
+            "schema": "vision-report/v3", "task": cfg.get("name") or args.task,
             "sensors": [], "source": {}, "elements": [], "anomalies": [],
             "metrics": {}, "truncated": False,
         }

@@ -25,6 +25,59 @@ import vs_schema as S
 from PIL import Image
 
 
+# ---- OCR 后处理：词典纠错（编辑距离）----
+
+# 常用中文/英文词典（轻量版，可扩展）
+COMMON_WORDS = {
+    "提交", "取消", "确定", "保存", "删除", "编辑", "搜索", "设置", "登录", "注册",
+    "退出", "返回", "下一步", "上一步", "完成", "取消", "确认", "关闭", "打开", "新建",
+    "submit", "cancel", "ok", "save", "delete", "edit", "search", "settings",
+    "login", "logout", "back", "next", "done", "close", "open", "new", "yes", "no",
+}
+
+
+def _levenshtein(a: str, b: str) -> int:
+    if len(a) < len(b):
+        a, b = b, a
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def dict_correct(text: str, max_dist: int = 1) -> tuple[str, float]:
+    """词典纠错：编辑距离 ≤ max_dist 的词典词替换。返回 (修正文本, 置信度)。"""
+    t = text.strip()
+    if not t or len(t) < 2:
+        return text, 1.0
+    best_word, best_dist = None, max_dist + 1
+    for word in COMMON_WORDS:
+        d = _levenshtein(t.lower(), word.lower())
+        if d < best_dist:
+            best_dist = d
+            best_word = word
+    if best_word and best_dist <= max_dist:
+        return best_word, 0.9  # 纠错后置信度 0.9
+    return text, 1.0
+
+
+def postprocess_items(items: list[dict]) -> list[dict]:
+    """OCR 后处理：词典纠错 + 置信度加权。"""
+    out = []
+    for it in items:
+        text = it.get("text", "")
+        corrected, conf_factor = dict_correct(text)
+        it["text"] = corrected
+        if conf_factor < 1.0:
+            it["conf"] = round(it.get("conf", 0.5) * conf_factor, 3)
+            it["corrected"] = True
+        out.append(it)
+    return out
+
+
 _PADDLE_ENGINE = None
 
 
@@ -202,11 +255,12 @@ def main() -> int:
                         break
 
         items = items[: args.max_items]
+        items = postprocess_items(items)  # 词典纠错 + 置信度加权
         els = [{"id": i, "type": "text", "bbox": it["bbox"], "text": it["text"],
                 "conf": it["conf"], "color": None, "font": None, "z": None,
                 "source": ["ocr"], "coordsys": "image_px", "center": it["center"], "quad": it["quad"]}
                for i, it in enumerate(items)]
-        print(S.dump_json({"schema": "vision-report/v2", "task": "ocr", "sensors": ["ocr"],
+        print(S.dump_json({"schema": "vision-report/v3", "task": "ocr", "sensors": ["ocr"],
                           "coordsys": "image_px",
                           "source": {"type": "image", "path": args.image, "size_px": [w, h],
                                       "backend": args.backend},

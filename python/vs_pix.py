@@ -47,38 +47,20 @@ def parse_region(s: str):
 
 
 def connected_components(mask_img, min_pixels: int = 25, max_comps: int = 20):
-    """diff 掩码的 8-连通域分析 → 独立异常区域 bbox（去噪，上限保护）。"""
-    from collections import deque
+    """diff 掩码的 8-连通域分析 → 独立异常区域 bbox（numpy 向量化）。"""
+    import numpy as np
+    from scipy import ndimage
 
-    w, h = mask_img.size
-    data = mask_img.tobytes()
-    visited = bytearray(w * h)
+    mask = np.array(mask_img) > 0
+    labeled, n = ndimage.label(mask, structure=np.ones((3, 3)))
     comps = []
-    for y in range(h):
-        for x in range(w):
-            idx = y * w + x
-            if visited[idx] or data[idx] == 0:
-                continue
-            q = deque([(x, y)])
-            visited[idx] = 1
-            xs, ys, n = [], [], 0
-            while q:
-                cx, cy = q.popleft()
-                xs.append(cx)
-                ys.append(cy)
-                n += 1
-                x0, x1 = max(0, cx - 1), min(w - 1, cx + 1)
-                y0, y1 = max(0, cy - 1), min(h - 1, cy + 1)
-                for ny in range(y0, y1 + 1):
-                    for nx in range(x0, x1 + 1):
-                        ni = ny * w + nx
-                        if not visited[ni] and data[ni] > 0:
-                            visited[ni] = 1
-                            q.append((nx, ny))
-            if n >= min_pixels:
-                comps.append({"bbox": [min(xs), min(ys), max(xs), max(ys)], "count": n})
-                if len(comps) >= max_comps:
-                    break
+    for i in range(1, n + 1):
+        ys, xs = np.nonzero(labeled == i)
+        if len(ys) >= min_pixels:
+            comps.append({"bbox": [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())],
+                          "count": int(len(ys))})
+            if len(comps) >= max_comps:
+                break
     return comps
 
 
@@ -96,23 +78,36 @@ def main() -> int:
         im = Image.open(args.image).convert("RGB")
         w, h = im.size
         total = w * h
-        out = {"schema": "vision-report/v2", "task": "pix", "sensors": ["pix"],
+        out = {"schema": "vision-report/v3", "task": "pix", "sensors": ["pix"],
                "coordsys": "image_px",
                "source": {"type": "image", "path": args.image, "size_px": [w, h]},
                "elements": [], "anomalies": [], "metrics": {}}
 
-        # 1) 主色直方图
-        q = im.quantize(colors=args.colors, method=Image.Quantize.MEDIANCUT).convert("RGB")  # type: ignore[attr-defined]
-        dom = sorted(q.getcolors(maxcolors=total) or [], key=lambda e: -e[0])
+        # 1) 主色直方图（SLIC 超像素 + 区域主色，替代 MEDIANCUT）
+        import numpy as np
+        from skimage.segmentation import slic
+
+        arr = np.array(im)
+        n_segments = max(10, min(200, (w * h) // 2000))
+        seg = slic(arr, n_segments=n_segments, compactness=10, start_label=1)
+        # 每超像素主色（均值）→ 颜色直方图
+        colors: dict[tuple, int] = {}
+        for sid in np.unique(seg):
+            mask = seg == sid
+            region = arr[mask]
+            mean_color = tuple(int(v) for v in region.mean(axis=0))
+            colors[mean_color] = colors.get(mean_color, 0) + int(mask.sum())
+        dom = sorted(colors.items(), key=lambda e: -e[1])
         metrics: dict[str, object] = {
             "dominant_colors": [
                 {
-                    "hex": hex_of(cast(Any, entry[1])),
-                    "rgb": [v for v in cast(Any, entry[1])],
-                    "pct": round(entry[0] / total * 100, 1),
+                    "hex": hex_of(cast(Any, entry[0])),
+                    "rgb": [v for v in cast(Any, entry[0])],
+                    "pct": round(entry[1] / total * 100, 1),
                 }
-                for entry in dom
-            ]
+                for entry in dom[: args.colors]
+            ],
+            "superpixels": n_segments,
         }
         stat_hsv = ImageStat.Stat(im.convert("HSV"))
         metrics["brightness"] = round(stat_hsv.mean[2])

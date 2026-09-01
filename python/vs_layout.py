@@ -63,7 +63,7 @@ def main() -> int:
             if len(els) >= args.max_items:
                 break
 
-        print(S.dump_json({"schema": "vision-report/v2", "task": "layout",
+        print(S.dump_json({"schema": "vision-report/v3", "task": "layout",
                           "sensors": ["layout"], "coordsys": "image_px",
                           "source": {"type": "image", "path": args.image,
                                      "size_px": [w, h], "engine": "PP-DocLayoutV3"},

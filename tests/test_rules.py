@@ -41,7 +41,7 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 
 def make_report(elements: list[dict], source: dict | None = None) -> dict:
     return {
-        "schema": "vision-report/v2", "task": "test", "sensors": ["test"],
+        "schema": "vision-report/v3", "task": "test", "sensors": ["test"],
         "coordsys": "css_px",
         "source": source or {"type": "fused", "size_px": [1000, 800]},
         "elements": elements,
@@ -157,7 +157,7 @@ def test_output_shape() -> None:
     p = OUT / "rules_shape.json"
     p.write_text(json.dumps(rep), encoding="utf-8")
     out = run_tool("vs_rules.py", ["--report", str(p)])
-    check("schema v2 envelope", out.get("schema") == "vision-report/v2" and out.get("task") == "rules")
+    check("schema v2 envelope", out.get("schema") == "vision-report/v3" and out.get("task") == "rules")
     check("rules 清单（5 条）", len(out.get("rules", [])) == 5)
     check("metrics 含 design_score", "design_score" in out.get("metrics", {}))
     check("severity 计数", set(out["metrics"]["severity"]) <= {"critical", "warn", "info"})

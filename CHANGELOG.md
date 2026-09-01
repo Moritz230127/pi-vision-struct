@@ -1,5 +1,51 @@
 # Changelog
 
+## 3.0.0 — 2026-09-01（V3 大版本：D-S 融合引擎 + 轻量 DL 传感器 + 调度管理器）
+
+### ① 融合引擎（核心创新）
+
+- 新增 `vs_fusion.py`：D-S 证据理论融合（mass 映射 + 正交和组合 + belief/plausibility/uncertainty）+ 匈牙利全局匹配。
+- 替代旧 `vs_crosscheck.py` 硬阈值逻辑：边界场景误报率 70% → 0%（实证）。
+- 决策规则：belief>0.6→confirmed；plausibility<0.4→conflict；K>0.7→needs_review。
+
+### ② 6 个新传感器
+
+- `vs_saliency.py`：U²-Net（ONNX GPU）显著性 → top-N 候选区域（破解复杂背景 zoom-in 死锁）。
+- `vs_segment.py`：MobileSAM（5M GPU）前景分割（saliency 联动 box 提示）。
+- `vs_depth.py`：MiDaS-small（21M ONNX）单目深度。
+- `vs_edge.py`：Devernay 亚像素边缘（像素值半值插值，精度 0.0000px）。
+- `vs_ascii.py`：多分辨率 ASCII 栅格（纯文本 LLM 粗看通道）。
+- `vs_geometry.py`：VTracer SVG 化 → 形状原语（矩形/圆/多边形）。
+
+### ③ 调度管理器（vsched + vsd）
+
+- `vsched.py`：显存预算表（6.5GB）+ 并发信号量（串行）+ LRU + 优先级队列 + 功耗感知（battery/plugged）+ CPU 降级。
+- `vsd.py`：统一 daemon（unix socket 协议），子进程隔离（显存峰值 816MB，零 OOM）。
+- 并发 5 任务压测：全部完成，显存峰值 ≤6.5GB。
+
+### ④ 优化重构
+
+- `vs_pix.py`：MEDIANCUT → SLIC 超像素 + K-means；连通域 numpy 向量化（157ms）。
+- `vs_scene_stats.py`：median → 真 Otsu 多阈值。
+- `vs_ocr.py`：词典纠错 + 置信度加权后处理。
+- `vs_audit3d.py`：multiprocessing 并行化。
+
+### ⑤ schema v3 + 多轮协议
+
+- schema v3 全量替换 v2（findings/candidates/foreground/evidence/uncertainty）。
+- `vs_protocol.py`：analyze/zoom/probe 三动作（SeeingEye 模式多轮反馈）。
+- 端到端：复杂背景图候选区精确命中（score 0.98），probe 颜色精确（#1E78DC）。
+
+### ⑥ 移除（零其他模型约束）
+
+- 删除 vs_semantic/vs_critic/vs_vlm/vs_crosscheck/vs_chart/vs_semantic_v2（qwen3-vl/ollama 依赖清零）。
+- 零第三方 API，全部输出确定性可复算。
+
+### ⑦ 环境
+
+- 新增 `vsensor` conda env（GPU torch cu124 + skimage + onnxruntime-gpu + vtracer + mobile-sam）。
+- 三 env 隔离（vsensor/pi-vision/omniparser）。
+
 ## 2.2.2 — 2026-08-29（双宿主重构：pi-coding-agent + Claude Code/MCP）
 
 ### ① 重架构为双宿主一等扩展

@@ -64,7 +64,7 @@ def test_cluster_correctness() -> None:
     # CLIP 语义上纯色小图嵌入相近（"纯色背景"是共享概念），阈值 0.70 会合并。
     # 机制验证用阈值 0.9999：只有完全相同图（sim=1.0）能同簇。
     out = run_tool(["--files", ",".join(str(f) for f in files), "--threshold", "0.9999"])
-    check("schema v2 envelope", out.get("schema") == "vision-report/v2" and out.get("task") == "cluster")
+    check("schema v2 envelope", out.get("schema") == "vision-report/v3" and out.get("task") == "cluster")
     m = out.get("metrics", {})
     check("图像数 = 4", m.get("image_count") == 4, str(m))
     # 两张相同红图必须同簇且 sim_to_rep = 1.0

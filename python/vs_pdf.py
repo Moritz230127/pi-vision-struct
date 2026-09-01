@@ -67,7 +67,7 @@ def main() -> int:
                 rendered.append(str(path))
 
         print(json.dumps({
-            "schema": "vision-report/v2", "task": "pdf", "sensors": ["pdf"],
+            "schema": "vision-report/v3", "task": "pdf", "sensors": ["pdf"],
             "coordsys": "pt",
             "source": {"type": "pdf", "path": args.file, "pages": total_pages,
                        "page_size_pt": [round(float(doc[0].rect.width), 1),

@@ -116,7 +116,7 @@ def parse_image(image_path: str, max_items: int, no_ocr: bool) -> dict:
                     "conf": None, "color": None, "font": None, "z": None,
                     "source": ["omniparser"], "coordsys": "image_px",
                     "interactivity": bool(it.get("interactivity"))})
-    return {"schema": "vision-report/v2", "task": "omniparser",
+    return {"schema": "vision-report/v3", "task": "omniparser",
             "sensors": ["omniparser"], "coordsys": "image_px",
             "source": {"type": "image", "path": image_path, "size_px": [w, h],
                        "engine": "OmniParser-v2-daemon", "box_threshold": 0.05},

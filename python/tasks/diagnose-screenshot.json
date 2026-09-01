@@ -1,12 +1,11 @@
 {
   "name": "diagnose-screenshot",
-  "description": "截图诊断：像素测量 + OCR + 可选 DOM → 融合交叉验证报告",
+  "description": "截图诊断：像素测量 + OCR + 可选 DOM → D-S 融合报告（v3）",
   "steps": [
     {"as": "pix",  "cmd": ["vs_pix.py", "--image", "$INPUT", "--colors", "8"]},
     {"as": "ocr",  "cmd": ["vs_ocr.py", "--image", "$INPUT", "--max-items", "60"]},
     {"as": "dom",  "cmd": ["vs_dom.py", "--url", "$URL"], "if": "$URL", "optional": true},
-    {"as": "fused", "cmd": ["vs_crosscheck.py", "--image", "$INPUT",
-                            "--dom", "$dom", "--ocr", "$ocr", "--dpr", "$DPR"]}
+    {"as": "fused", "cmd": ["vs_fusion.py", "--reports", "$pix", "$ocr"]}
   ],
   "report": "fused"
 }

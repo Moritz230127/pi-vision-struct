@@ -15,7 +15,7 @@ import math
 import json
 from typing import Any, Sequence
 
-SCHEMA = "vision-report/v2"
+SCHEMA = "vision-report/v3"
 
 # ---------------------------------------------------------------- 元素模型
 
@@ -34,7 +34,8 @@ def envelope(task: str | None = None, sensors: list[str] | None = None,
     return {
         "schema": SCHEMA, "task": task, "sensors": list(sensors or []),
         "coordsys": coordsys, "source": source or {},
-        "elements": [], "anomalies": [], "metrics": {}, "truncated": False,
+        "elements": [], "findings": [], "candidates": [], "foreground": None,
+        "metrics": {}, "truncated": False,
     }
 
 

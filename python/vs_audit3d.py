@@ -150,6 +150,91 @@ def bbox3d_distance(a, b) -> float:
     return gap
 
 
+def _analyze_pair(pair_args: tuple) -> list[dict]:
+    """分析一对物体（模块级，可 pickle，供 multiprocessing）。
+
+    pair_args: (a, b, threshold_m, method)
+    返回: findings 列表（含 rule/severity/distance_mm/method/evidence）
+    """
+    a, b, threshold_m, method = pair_args
+    findings = []
+    if not a.get("bbox3d") or not b.get("bbox3d"):
+        return findings
+
+    # 预筛：AABB 若已分离则直接跳过（加速）
+    aabb_d = bbox3d_distance(a["bbox3d"], b["bbox3d"])
+    if aabb_d > threshold_m:
+        return findings  # AABB 已明显分离
+
+    ca, axes_a, half_a = _obb_axes(_corners(a["bbox3d"]))
+    cb, axes_b, half_b = _obb_axes(_corners(b["bbox3d"]))
+
+    sep = None
+    if method in ("auto", "obb"):
+        sep = _sat_separation(ca, axes_a, half_a, cb, axes_b, half_b)
+
+    if sep is not None and sep > threshold_m:
+        # OBB 明确分离
+        findings.append({
+            "rule": "clearance", "element_ids": [a.get("_idx"), b.get("_idx")],
+            "severity": "info", "distance_mm": round(sep * 1000, 4),
+            "method": "obb-sat",
+            "evidence": {"a": a["name"], "b": b["name"],
+                         "collection_a": a.get("collection"),
+                         "collection_b": b.get("collection"),
+                         "clearance_mm": round(sep * 1000, 4)},
+        })
+        return findings
+
+    # OBB 重叠或仅 mesh 档 → 网格级点云距离（最大精度）
+    va = np.asarray(a["verts"]) if a.get("verts") else None
+    vb = np.asarray(b["verts"]) if b.get("verts") else None
+    if method in ("auto", "mesh") and va is not None and vb is not None and HAVE_SCIPY:
+        dist = _surface_distance(va, vb)
+        if dist != dist:  # nan
+            return findings
+        if dist <= 1e-6:
+            findings.append({
+                "rule": "interference", "element_ids": [a.get("_idx"), b.get("_idx")],
+                "severity": "critical", "distance_mm": 0.0, "method": "mesh-kdtree",
+                "evidence": {"a": a["name"], "b": b["name"],
+                             "collection_a": a.get("collection"),
+                             "collection_b": b.get("collection"),
+                             "penetration_mm": 0.0},
+            })
+        elif dist < threshold_m:
+            findings.append({
+                "rule": "tight_gap", "element_ids": [a.get("_idx"), b.get("_idx")],
+                "severity": "warn", "distance_mm": round(dist * 1000, 4),
+                "method": "mesh-kdtree",
+                "evidence": {"a": a["name"], "b": b["name"],
+                             "collection_a": a.get("collection"),
+                             "collection_b": b.get("collection"),
+                             "gap_mm": round(dist * 1000, 4)},
+            })
+        else:
+            findings.append({
+                "rule": "clearance", "element_ids": [a.get("_idx"), b.get("_idx")],
+                "severity": "info", "distance_mm": round(dist * 1000, 4),
+                "method": "mesh-kdtree",
+                "evidence": {"a": a["name"], "b": b["name"],
+                             "collection_a": a.get("collection"),
+                             "collection_b": b.get("collection"),
+                             "clearance_mm": round(dist * 1000, 4)},
+            })
+    else:
+        # 无点云回退：AABB 穿透深度（保守）
+        findings.append({
+            "rule": "interference", "element_ids": [a.get("_idx"), b.get("_idx")],
+            "severity": "critical", "distance_mm": 0.0, "method": "aabb-fallback",
+            "evidence": {"a": a["name"], "b": b["name"],
+                         "collection_a": a.get("collection"),
+                         "collection_b": b.get("collection"),
+                         "penetration_mm": round(-aabb_d * 1000, 4)},
+        })
+    return findings
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--report", required=True)
@@ -175,119 +260,34 @@ def main() -> int:
 
         method_used = set()
 
+        # 并行对级分析（multiprocessing.Pool）
+        pairs = []
         for i in range(len(mesh_objs)):
             for j in range(i + 1, len(mesh_objs)):
                 a, b = mesh_objs[i], mesh_objs[j]
-                if not a.get("bbox3d") or not b.get("bbox3d"):
-                    continue
+                a = dict(a); b = dict(b)
+                a["_idx"] = i; b["_idx"] = j
+                pairs.append((a, b, threshold_m, args.method))
 
-                # 预筛：AABB 若已分离则直接跳过（加速）
-                aabb_d = bbox3d_distance(a["bbox3d"], b["bbox3d"])
-                if aabb_d > threshold_m:
-                    # AABB 已明显分离，无需精细判定
-                    method_used.add("aabb-skip")
-                    continue
+        use_parallel = len(pairs) > 8 and os.environ.get("VS_AUDIT3D_SERIAL") != "1"
+        if use_parallel:
+            import multiprocessing as mp
+            n_proc = min(mp.cpu_count(), 8)
+            with mp.Pool(n_proc) as pool:
+                pair_results = pool.map(_analyze_pair, pairs)
+        else:
+            pair_results = [_analyze_pair(p) for p in pairs]
 
-                ca, axes_a, half_a = _obb_axes(_corners(a["bbox3d"]))
-                cb, axes_b, half_b = _obb_axes(_corners(b["bbox3d"]))
-
-                sep = None
-                if args.method in ("auto", "obb"):
-                    sep = _sat_separation(ca, axes_a, half_a, cb, axes_b, half_b)
-                    method_used.add("obb-sat")
-
-                if sep is not None and sep > threshold_m:
-                    # OBB 明确分离
-                    findings.append({
-                        "rule": "clearance",
-                        "element_ids": [i, j],
-                        "severity": "info",
-                        "distance_mm": round(sep * 1000, 4),
-                        "method": "obb-sat",
-                        "evidence": {"a": a["name"], "b": b["name"],
-                                     "collection_a": a.get("collection"),
-                                     "collection_b": b.get("collection"),
-                                     "clearance_mm": round(sep * 1000, 4)},
-                    })
+        for res in pair_results:
+            findings.extend(res)
+            for f in res:
+                if f["rule"] == "interference":
+                    interference_count += 1
+                elif f["rule"] == "tight_gap":
+                    gap_warnings += 1
+                elif f["rule"] == "clearance":
                     verified_clearance += 1
-                    continue
-
-                # OBB 重叠或仅 mesh 档 → 网格级点云距离（最大精度）
-                va = np.asarray(a["verts"]) if a.get("verts") else None
-                vb = np.asarray(b["verts"]) if b.get("verts") else None
-                if args.method in ("auto", "mesh") and va is not None and vb is not None and HAVE_SCIPY:
-                    dist = _surface_distance(va, vb)
-                    method_used.add("mesh-kdtree")
-                    if dist != dist:  # nan
-                        continue
-                    if dist <= 1e-6:
-                        interference_count += 1
-                        findings.append({
-                            "rule": "interference",
-                            "element_ids": [i, j],
-                            "severity": "critical",
-                            "distance_mm": 0.0,
-                            "method": "mesh-kdtree",
-                            "evidence": {"a": a["name"], "b": b["name"],
-                                         "collection_a": a.get("collection"),
-                                         "collection_b": b.get("collection"),
-                                         "penetration_mm": 0.0},
-                        })
-                    elif dist < threshold_m:
-                        gap_warnings += 1
-                        findings.append({
-                            "rule": "tight_gap",
-                            "element_ids": [i, j],
-                            "severity": "warn",
-                            "distance_mm": round(dist * 1000, 4),
-                            "method": "mesh-kdtree",
-                            "evidence": {"a": a["name"], "b": b["name"],
-                                         "collection_a": a.get("collection"),
-                                         "collection_b": b.get("collection"),
-                                         "gap_mm": round(dist * 1000, 4)},
-                        })
-                    else:
-                        verified_clearance += 1
-                        findings.append({
-                            "rule": "clearance",
-                            "element_ids": [i, j],
-                            "severity": "info",
-                            "distance_mm": round(dist * 1000, 4),
-                            "method": "mesh-kdtree",
-                            "evidence": {"a": a["name"], "b": b["name"],
-                                         "collection_a": a.get("collection"),
-                                         "collection_b": b.get("collection"),
-                                         "clearance_mm": round(dist * 1000, 4)},
-                        })
-                else:
-                    # 回退 AABB
-                    method_used.add("aabb-fallback")
-                    if aabb_d < 0:
-                        interference_count += 1
-                        findings.append({
-                            "rule": "interference",
-                            "element_ids": [i, j],
-                            "severity": "critical",
-                            "distance_mm": round(aabb_d * 1000, 4),
-                            "method": "aabb-fallback",
-                            "evidence": {"a": a["name"], "b": b["name"],
-                                         "collection_a": a.get("collection"),
-                                         "collection_b": b.get("collection"),
-                                         "penetration_mm": round(-aabb_d * 1000, 4)},
-                        })
-                    elif 0 <= aabb_d < threshold_m:
-                        gap_warnings += 1
-                        findings.append({
-                            "rule": "tight_gap",
-                            "element_ids": [i, j],
-                            "severity": "warn",
-                            "distance_mm": round(aabb_d * 1000, 4),
-                            "method": "aabb-fallback",
-                            "evidence": {"a": a["name"], "b": b["name"],
-                                         "collection_a": a.get("collection"),
-                                         "collection_b": b.get("collection"),
-                                         "gap_mm": round(aabb_d * 1000, 4)},
-                        })
+                method_used.add(f["method"])
 
         metrics = {
             "total_objects": len(objs),

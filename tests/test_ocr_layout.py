@@ -45,7 +45,7 @@ def run_tool(args: list[str], timeout: int = 400) -> dict:
 def test_ocr_rapid_default() -> None:
     print("[vs_ocr] 默认后端 rapidocr")
     d = run_tool(["vs_ocr.py", "--image", str(TEXT)])
-    check("schema v2", d.get("schema") == "vision-report/v2")
+    check("schema v2", d.get("schema") == "vision-report/v3")
     check("source 标注 backend=rapidocr", d["source"].get("backend") == "rapidocr")
     check("text_lines 检出 ≥8 元素", len(d.get("elements", [])) >= 8,
           f"got {len(d.get('elements', []))}")
@@ -83,7 +83,7 @@ def test_layout() -> None:
     print("[vs_layout] 文档版式（PP-DocLayoutV3）")
     d = run_tool(["vs_layout.py", "--image", str(PAGE)])
     els = d.get("elements", [])
-    check("schema v2 + task=layout", d.get("schema") == "vision-report/v2" and d.get("task") == "layout")
+    check("schema v2 + task=layout", d.get("schema") == "vision-report/v3" and d.get("task") == "layout")
     check("检出 ≥2 区域", len(els) >= 2, f"got {len(els)}")
     check("区域含 label/bbox/conf", all(e.get("label") and e.get("bbox") and e.get("conf")
                                         for e in els[:5]))
