@@ -10,11 +10,15 @@
 //! - [`util`]：Python 兼容的取整等基础工具
 
 pub mod ascii;
+pub mod audit;
 pub mod bbox;
 pub mod color;
 pub mod edge;
+pub mod fusion;
+pub mod geometry;
 pub mod image;
 pub mod pix;
+pub mod rules;
 pub mod scene_stats;
 pub mod schema;
 pub mod util;

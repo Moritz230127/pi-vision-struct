@@ -1,13 +1,14 @@
 //! vs-bin — V4 单二进制 CLI。
 //!
-//! 子命令 = action 枚举（25 动作，随阶段逐步填充）。S1 已接入：
-//! `ascii` / `scene_stats` / `pix` / `edge`（纯算法传感器）+ `schema` 冒烟。
+//! 子命令 = action 枚举（25 动作，随阶段逐步填充）。S1-S2 已接入：
+//! `ascii` / `scene_stats` / `pix` / `edge`（纯算法传感器）+
+//! `fusion` / `rules` / `audit` / `geometry`（融合与规则引擎）+ `schema` 冒烟。
 
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use serde_json::json;
-use vs_core::{ascii, edge, pix, scene_stats};
+use vs_core::{ascii, audit, edge, fusion, geometry, pix, rules, scene_stats};
 
 /// 数理化视觉套件 V4（全面 Rust 重写）。
 #[derive(Parser)]
@@ -64,6 +65,41 @@ enum Command {
         #[arg(long, default_value_t = 2000)]
         max_points: u32,
     },
+    /// 融合引擎（D-S 证据 + 匈牙利匹配）。
+    Fusion {
+        /// 传感器报告 JSON 路径（可多个）
+        #[arg(long, required = true, num_args = 1..)]
+        reports: Vec<String>,
+        /// 匹配组定义 JSON
+        #[arg(long)]
+        groups: Option<String>,
+    },
+    /// 设计准则规则引擎（对比度/重叠/对齐/间距/安全区）。
+    Rules {
+        #[arg(long)]
+        report: PathBuf,
+        /// 画布尺寸 WxH
+        #[arg(long)]
+        canvas: Option<String>,
+    },
+    /// 元素级几何/样式审计。
+    Audit {
+        #[arg(long)]
+        report: PathBuf,
+        /// 画布尺寸 WxH
+        #[arg(long)]
+        canvas: Option<String>,
+    },
+    /// 几何原语（VTracer SVG → 形状）。
+    Geometry {
+        #[arg(long)]
+        image: PathBuf,
+        /// polygon | spline
+        #[arg(long, default_value = "polygon")]
+        mode: String,
+        #[arg(long, default_value_t = 50)]
+        max_shapes: u32,
+    },
 }
 
 fn main() {
@@ -113,6 +149,37 @@ fn main() {
             },
         )
         .unwrap_or_else(|e| json!({"error": "vs_edge failed", "detail": e})),
+        Command::Fusion { reports, groups } => {
+            let paths: Vec<PathBuf> = reports.iter().map(PathBuf::from).collect();
+            fusion::run(&paths, groups.as_deref())
+                .unwrap_or_else(|e| json!({"error": "vs_fusion failed", "detail": e}))
+        }
+        Command::Rules { report, canvas } => rules::run(
+            &report,
+            &rules::RulesParams {
+                canvas,
+                ..rules::RulesParams::default()
+            },
+        )
+        .unwrap_or_else(|e| json!({"error": "vs_rules failed", "detail": e})),
+        Command::Audit { report, canvas } => audit::run(
+            &report,
+            &audit::AuditParams {
+                canvas,
+                overlap_threshold: 0.05,
+                min_overlap_area: 400.0,
+            },
+        )
+        .unwrap_or_else(|e| json!({"error": "vs_audit failed", "detail": e})),
+        Command::Geometry {
+            image,
+            mode,
+            max_shapes,
+        } => geometry::run(
+            &image,
+            &geometry::GeometryParams { mode, max_shapes },
+        )
+        .unwrap_or_else(|e| json!({"error": "vs_geometry failed", "detail": e})),
     };
     println!("{}", serde_json::to_string_pretty(&out).unwrap());
 }
