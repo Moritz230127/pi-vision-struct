@@ -51,6 +51,7 @@
 ```
 
 **关键变化 vs v2.x**：
+
 - 单端口 22 动作 → **分层流水线 + 传感器注册表**（动作仍保留，但内部走统一管线）
 - 硬阈值融合 → **D-S 证据融合 + 不确定性输出**
 - 朴素最大 IoU 匹配 → **匈牙利/最优传输全局匹配**
@@ -77,6 +78,7 @@
 ```
 
 mass 转换规则（确定性映射，无学习）：
+
 - OCR 文本存在性：`mass[consistent] = conf × 0.8`，`mass[uncertain] = 1 - mass[consistent]`
 - DOM 声明色 vs 像素实测：ΔE → `mass[consistent] = exp(-ΔE/τ)`（τ=5.0 可配）
 - 检测器：`mass[consistent] = conf`（OWLv2/MobileSAM 自带置信度）
@@ -97,6 +99,7 @@ K = Σ_{B∩C=∅} m₁(B)·m₂(C)   (冲突系数)
 ### 2.3 全局匹配（匈牙利 / 最优传输）
 
 替代朴素 `max(IoU)`：
+
 - 构建代价矩阵 `C[i][j] = 1 - IoU(box_i, box_j)`（+ 类别/文本相似度项）
 - **匈牙利算法**（scipy.optimize.linear_sum_assignment）全局最优一对一匹配
 - 可选 **UOT**（不平衡最优传输）处理"多对一"（一个 DOM 元素 = 多个 OCR 片段）
@@ -104,6 +107,7 @@ K = Σ_{B∩C=∅} m₁(B)·m₂(C)   (冲突系数)
 ### 2.4 不确定性传播
 
 每个 finding 输出 `uncertainty` 字段：
+
 ```json
 {
   "finding": "text_missing",
@@ -113,6 +117,7 @@ K = Σ_{B∩C=∅} m₁(B)·m₂(C)   (冲突系数)
   "evidence": ["ocr:conf=0.9", "dom:text='提交'", "iou_match=0.0"]
 }
 ```
+
 DeepSeek 据此决定：直接采信 / 请求 zoom-in 复查 / 标记存疑。
 
 ---
@@ -122,7 +127,7 @@ DeepSeek 据此决定：直接采信 / 请求 zoom-in 复查 / 标记存疑。
 ### 3.1 新增传感器
 
 | 传感器 | 模型/算法 | 参数 | 输出 | 破解痛点 |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `saliency` | U²-Net（轻量版） | ~4M | 显著性图 → top-N 候选区域 bbox | **zoom-in 死锁**（复杂背景） |
 | `segment` | MobileSAM（Tiny-ViT 5M） | 5M, CPU 3s | 前景/背景 mask → 前景 bbox + 面积比 | **复杂背景分离** |
 | `depth` | MiDaS-small（21M, ONNX 80MB） | 256×256 | 逆深度图 → 相对深度统计 | 精密零件空间关系 |
@@ -133,7 +138,7 @@ DeepSeek 据此决定：直接采信 / 请求 zoom-in 复查 / 标记存疑。
 ### 3.2 优化传感器
 
 | 传感器 | v2 现状 | v3 优化 | 依据 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `pix` | MEDIANCUT 量化 + 纯 Python BFS | **SLIC 超像素 + K-means**；numpy 向量化连通域 | PAMI 2011 SLIC；Numba 10-100× |
 | `scene_stats` | median 当 Otsu 阈值 | **真 Otsu 多阈值** + 超像素前景分离 | 经典 Otsu |
 | `ocr` | 双后端无后处理 | **置信度加权 + 词典纠错 + 多假设** | ConfBERT 思路（轻量版） |
@@ -144,7 +149,7 @@ DeepSeek 据此决定：直接采信 / 请求 zoom-in 复查 / 标记存疑。
 ### 3.3 移除
 
 | 组件 | 原因 |
-|---|---|
+| --- | --- |
 | `vs_semantic.py`（qwen3-vl:8b L2 语义） | 违反"零其他模型"约束；语义推理由 DeepSeek 承担 |
 | `vs_critic.py`（VLM 复核） | 同上；改由 D-S 融合的 belief/plausibility 承担"复核"角色 |
 | `vs_vlm.py` 网关 | 同上 |
@@ -156,6 +161,7 @@ DeepSeek 据此决定：直接采信 / 请求 zoom-in 复查 / 标记存疑。
 ### 4.1 常驻守护进程（统一 daemon 管理器）
 
 现有 ocrserver/omniserver 模式 → 统一 `vsd`（vision daemon）：
+
 - 单进程管理所有 DL 传感器（saliency/segment/depth/detect），模型驻留内存
 - unix socket 行分隔 JSON（现有模式），冷载一次，后续 <100ms
 - 健康检查 + 自动拉起 + 优雅降级（daemon 不可用 → 纯算法路径）
@@ -163,7 +169,7 @@ DeepSeek 据此决定：直接采信 / 请求 zoom-in 复查 / 标记存疑。
 ### 4.2 计算优化
 
 | 热点 | 优化 | 预期 |
-|---|---|---|
+| --- | --- | --- |
 | 连通域（vs_pix diff） | numpy 向量化 / Numba JIT | 10-100× |
 | 颜色量化 | SLIC（skimage 已向量化） | 5-10× |
 | 匹配（crosscheck） | 匈牙利（scipy）替代 O(n²) 朴素 | 匹配质量↑ |
@@ -173,7 +179,7 @@ DeepSeek 据此决定：直接采信 / 请求 zoom-in 复查 / 标记存疑。
 ### 4.3 资源预算（8GB VRAM / 31GB RAM）
 
 | 组件 | VRAM | RAM | 说明 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | MobileSAM | ~1GB（或纯 CPU） | 2GB | 默认 CPU（3s），GPU 可选 |
 | U²-Net | ~0.5GB | 1GB | CPU 可跑 |
 | MiDaS-small | ~0.3GB | 1GB | ONNX CPU |
@@ -227,7 +233,7 @@ DeepSeek 综合推理 → 最终答案
 ## 6. 迁移路径（v2.2.2 → v3.0.0）
 
 | 阶段 | 内容 | 验证 |
-|---|---|---|
+| --- | --- | --- |
 | M1 | 融合引擎重构（D-S + 匈牙利 + 不确定性） | 64 断言回归 + 误报率对比 |
 | M2 | 新增 saliency/segment/ascii/edge 传感器 | 各传感器基准卡 |
 | M3 | 性能优化（向量化 + daemon 统一） | 全流水线 <5s 基准 |
@@ -253,7 +259,7 @@ DeepSeek 综合推理 → 最终答案
 ## 8. 风险与回滚
 
 | 风险 | 缓解 | 回滚 |
-|---|---|---|
+| --- | --- | --- |
 | MobileSAM 分割质量不足 | 保留 OWLv2 检测联动；阈值可调 | 关闭 segment 传感器 |
 | D-S 组合对冲突证据敏感 | K 值上限保护；冲突→needs_review 而非误报 | 回退硬阈值模式（配置开关） |
 | 性能不达标 | daemon 驻留 + 缓存 + 可选 GPU | 降级纯算法路径 |

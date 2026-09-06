@@ -2,7 +2,7 @@
 # repair_omniparser.sh — 重建 OmniParser 权重到 ~/.cache/omniparser（持久目录，走代理 10808）
 set -e
 export HTTPS_PROXY= HTTP_PROXY=
-OMNI="$HOME/.cache/omniparser"  # 持久目录，重启不丢
+OMNI="$HOME/.cache/omniparser" # 持久目录，重启不丢
 WEIGHTS=$OMNI/weights
 PY=/home/Arch/conda-envs/omniparser/bin/python
 
@@ -15,7 +15,7 @@ mkdir -p "$WEIGHTS"
 echo "[2/4] download icon_detect_v3/model.pt"
 if [ ! -f "$WEIGHTS/icon_detect_v3/model.pt" ]; then
   mkdir -p "$WEIGHTS/icon_detect_v3"
-  $PY - << 'EOF'
+  $PY - <<'EOF'
 from huggingface_hub import hf_hub_download
 import os
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
@@ -29,7 +29,7 @@ fi
 echo "[3/4] download icon_caption_florence (3 files)"
 if [ ! -d "$WEIGHTS/icon_caption_florence" ]; then
   mkdir -p "$WEIGHTS/icon_caption_florence"
-  $PY - << 'EOF'
+  $PY - <<'EOF'
 from huggingface_hub import hf_hub_download
 import os, shutil
 for f in ["config.json", "model.safetensors", "generation_config.json"]:
@@ -40,7 +40,7 @@ EOF
 fi
 
 echo "[4/4] patch config.json (_name_or_path + auto_map)"
-$PY - << 'EOF'
+$PY - <<'EOF'
 import json
 import os
 p = os.path.expanduser("~/.cache/omniparser/weights/icon_caption_florence/config.json")

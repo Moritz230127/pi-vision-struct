@@ -18,6 +18,7 @@
 """
 import argparse
 import json
+import os
 import sys
 
 import numpy as np
@@ -41,7 +42,7 @@ def _corners(bbox3d: list) -> np.ndarray:
     return np.asarray(bbox3d, dtype=float).reshape(8, 3)
 
 
-def _obb_axes(corners: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _obb_axes(corners: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """从 bbox3d 8 角点还原 OBB：中心 + 三条局部轴（单位向量）+ 半长。
 
     Blender bound_box 顺序：index 0..7 对应 (x,y,z)∈{0,1}^3 的二进制编码，

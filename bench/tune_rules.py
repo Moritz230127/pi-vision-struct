@@ -81,7 +81,10 @@ def run_rules(report_path: str, params: dict) -> list[dict]:
             "--spacing-k", str(params["spacing_k"]),
             "--margin", str(params["margin"])]
     r = subprocess.run([PYBIN, *args], capture_output=True, text=True, timeout=120)
-    return json.loads(r.stdout).get("findings", [])
+    try:
+        return json.loads(r.stdout).get("findings", [])
+    except json.JSONDecodeError:
+        return []  # 子进程输出非 JSON（崩溃/报错），按无发现处理
 
 
 def evaluate(params: dict, samples: dict) -> float:

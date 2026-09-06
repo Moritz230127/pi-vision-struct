@@ -52,11 +52,17 @@ class Server(socketserver.ThreadingUnixStreamServer):
 
 
 def main() -> int:
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    if os.path.exists(SOCKET_PATH):
-        os.remove(SOCKET_PATH)  # 清理残留 socket（崩溃后重启）
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        if os.path.exists(SOCKET_PATH):
+            os.remove(SOCKET_PATH)  # 清理残留 socket（崩溃后重启）
+    except OSError:
+        pass  # 竞态/权限：socket 已被清理或不可达，忽略
     srv = Server(SOCKET_PATH, Handler)
-    os.chmod(SOCKET_PATH, 0o600)
+    try:
+        os.chmod(SOCKET_PATH, 0o600)
+    except OSError:
+        pass  # bind 失败时 chmod 无意义，serve_forever 会报错
     print(f"ocrserver ready on {SOCKET_PATH}", flush=True)
     srv.serve_forever()
     return 0

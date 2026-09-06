@@ -44,8 +44,11 @@ def _apply_florence_patch() -> None:
     p = f"{OMNI_DIR}/transformers_modules/transformers_modules/icon_caption_florence/modeling_florence2.py"
     if not os.path.exists(p):
         return
-    with open(p) as f:
-        src = f.read()
+    try:
+        with open(p) as f:
+            src = f.read()
+    except OSError:
+        return  # 读取失败（权限/瞬时），跳过补丁
     if "Compatibility fix (transformers >= 4.4x)" in src:
         return  # already patched
     old = """        if attention_mask is not None:
@@ -79,9 +82,12 @@ def _apply_florence_patch() -> None:
             attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len) + attention_mask
             attn_weights = attn_weights.view(bsz * self.num_heads, tgt_len, src_len)"""
     if old in src:
-        with open(p, "w") as f:
-            f.write(src.replace(old, new))
-        print("[omniserver] re-applied Florence-2 attention-mask patch")
+        try:
+            with open(p, "w") as f:
+                f.write(src.replace(old, new))
+            print("[omniserver] re-applied Florence-2 attention-mask patch")
+        except OSError:
+            print("[omniserver] patch write failed (read-only cache?)", flush=True)
 
 
 def load_models() -> None:

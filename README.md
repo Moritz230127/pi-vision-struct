@@ -80,7 +80,7 @@ DeepSeek 在文本推理上是最强模型之一，它不需要别人替它"理�
 **关键区别（v2 → v3）：**
 
 | v2.2.2 | v3.0.0 |
-|---|---|
+| --- | --- |
 | `crosscheck` 硬阈值（IoU>0.05, ΔE>5.0） | `fusion` **D-S 证据理论**（mass 组合 + belief/plausibility/uncertainty） |
 | 朴素 max-IoU 匹配 | **匈牙利全局匹配**（scipy linear_sum_assignment） |
 | MEDIANCUT 颜色量化 | **SLIC 超像素 + K-means** |
@@ -107,7 +107,7 @@ DeepSeek 在文本推理上是最强模型之一，它不需要别人替它"理�
 全部能力收敛为单一注册工具 `vs`，`action` 枚举分发到内部分发表：
 
 | 分发表 | 动作 | 传感器/引擎 |
-|---|---|---|
+| --- | --- | --- |
 | MEASURE | `capture` `pixels` `ocr` `wallpaper` `scene_stats` `env` | PIL / rapidocr / paddle / skimage |
 | STRUCT | `dom` `pptx` `omniparser` `layout` `pdf` `a11y` `detect` | playwright / CLIP / OWLv2 |
 | 3D | `blender_dump` `depth` `depth_geom` `audit3d` | bpy headless / 真几何深度 / OBB-SAT+KDTree |
@@ -146,7 +146,7 @@ DeepSeek 在文本推理上是最强模型之一，它不需要别人替它"理�
 pi 与 Claude Code 各写一个薄适配器壳，复用同一份 action 与同一份 Python 传感器（零改动）。
 
 | 宿主 | 入口 | 接入方式 |
-|---|---|---|
+| --- | --- | --- |
 | **pi-coding-agent** | `extensions/index.ts`（`@earendil-works/pi-coding-agent` 的 `ExtensionAPI`） | `package.json` 的 `pi.extensions` 自动加载 |
 | **Claude Code** | `extensions/server.mcp.ts`（MCP stdio server） | `claude mcp add pi-vision-struct -- node dist/extensions/server.mcp.js` |
 
@@ -159,8 +159,8 @@ pi 与 Claude Code 各写一个薄适配器壳，复用同一份 action 与同�
 ### 测量（pi-vision env）
 
 | 动作 | 参数 | 说明 |
-|---|---|---|
-| `capture` | `out` 必填 | Wayland 截屏（grim）|
+| --- | --- | --- |
+| `capture` | `out` 必填 | Wayland 截屏（grim） |
 | `pixels` | `image` + `colors`/`regions`/`compare`/`wcag`/`threshold` | SLIC 超像素主色、区域取色、双图 diff（向量化连通域）、WCAG 对比度 |
 | `ocr` | `image` + `region`/`upscale`/`max_items`/`min_conf`/`backend`/`preprocess`/`daemon` | 文字 + 4点bbox + conf + **词典纠错后处理** |
 | `scene_stats` | `image` + `region`/`colors` | 真 Otsu 面积比、颜色直方图、对比度统计、空间布局 |
@@ -170,45 +170,45 @@ pi 与 Claude Code 各写一个薄适配器壳，复用同一份 action 与同�
 ### 结构（L0 源码 + DL 感知）
 
 | 动作 | 参数 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | `dom` | `url` + `max_elements`/`screenshot` | DOM+computed style，真值 |
 | `pptx` | `file` + `max_shapes`/`slide` | shapes/字体/颜色/pt 坐标 |
-| `omniparser` | `image` + `max_items`/`no_ocr` | 图标级元素（YOLOv9 + Florence-2）|
-| `layout` | `image` + `max_items`/`min_conf` | 文档版式（PP-DocLayoutV3）|
+| `omniparser` | `image` + `max_items`/`no_ocr` | 图标级元素（YOLOv9 + Florence-2） |
+| `layout` | `image` + `max_items`/`min_conf` | 文档版式（PP-DocLayoutV3） |
 | `pdf` | `file` + `pages`/`render_dir` | PDF 文本块抽取 |
-| `a11y` | `list`/`app`/`max_elements`/`with_text` | 无障碍树（AT-SPI，screen_px）|
+| `a11y` | `list`/`app`/`max_elements`/`with_text` | 无障碍树（AT-SPI，screen_px） |
 | `detect` | `image` + `classes`(逗号分隔开放词表) | OWLv2 zero-shot 物体检测 |
 
 ### L2 轻量感知（vsensor env，GPU）
 
 | 动作 | 参数 | 说明 |
-|---|---|---|
-| `saliency` | `image` + `top_n`/`min_score`/`device` | U²-Net 显著性 → top-N 候选区域（破解复杂背景 zoom-in 死锁）|
-| `segment` | `image` + `saliency`(联动)/`device` | MobileSAM 前景分割（saliency bbox 提示）|
-| `depth_midas` | `image` + `region`/`device` | MiDaS 单目深度（近/中/远分布）|
-| `edge` | `image` + `max_lines` | Devernay 亚像素边缘（像素值半值插值，精度 0.0000px）|
-| `ascii` | `image` + `cols`/`rows`/`color` | 多分辨率 ASCII 栅格（纯文本 LLM 粗看通道）|
-| `geometry` | `image` + `max_shapes` | VTracer SVG 化 → 形状原语（矩形/圆/多边形）|
+| --- | --- | --- |
+| `saliency` | `image` + `top_n`/`min_score`/`device` | U²-Net 显著性 → top-N 候选区域（破解复杂背景 zoom-in 死锁） |
+| `segment` | `image` + `saliency`(联动)/`device` | MobileSAM 前景分割（saliency bbox 提示） |
+| `depth_midas` | `image` + `region`/`device` | MiDaS 单目深度（近/中/远分布） |
+| `edge` | `image` + `max_lines` | Devernay 亚像素边缘（像素值半值插值，精度 0.0000px） |
+| `ascii` | `image` + `cols`/`rows`/`color` | 多分辨率 ASCII 栅格（纯文本 LLM 粗看通道） |
+| `geometry` | `image` + `max_shapes` | VTracer SVG 化 → 形状原语（矩形/圆/多边形） |
 
 ### 三维（Blender 数理化）
 
 | 动作 | 参数 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | `blender_dump` | `blend` 必填 | Blender 场景图：`objects3d[]`（matrix_world 4×4 + bbox3d 8×3 + collection/material/visible）+ cameras |
-| `depth` | `image` 必填 | 深度矩阵统计（near/far/median/std/histogram/center_depth）|
-| `depth_geom` | `blend`+`camera`/`image` | **真几何深度**：Blender 内栅格化相机空间距离（米）|
-| `audit3d` | `report` + `gap_threshold`(默认15mm) | OBB-SAT + 网格级 KDTree 干涉/间隙检测（multiprocessing 并行）|
+| `depth` | `image` 必填 | 深度矩阵统计（near/far/median/std/histogram/center_depth） |
+| `depth_geom` | `blend`+`camera`/`image` | **真几何深度**：Blender 内栅格化相机空间距离（米） |
+| `audit3d` | `report` + `gap_threshold`(默认15mm) | OBB-SAT + 网格级 KDTree 干涉/间隙检测（multiprocessing 并行） |
 
 ### 融合（F1 引擎 + F2 协议）
 
 | 动作 | 参数 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | `fusion` | `reports`(多传感器 JSON) | **D-S 证据融合**：匈牙利匹配 → mass 组合 → belief/plausibility/uncertainty |
 | `analyze` | `image` | **粗报告**：saliency 候选 + ascii 栅格 + scene_stats + ocr + 融合 findings |
 | `zoom` | `image` + `region` | **细报告**：区域 OCR 高倍 + edge 亚像素 + depth + segment 前景 |
 | `probe` | `image` + `bbox` + `sensor` | **定向取证**：单传感器在 bbox 区域的结果 |
 | `audit` | `report` + `canvas`/`overlap_threshold` | 2D 重叠/出界/对比度 |
-| `rules` | `report` + `canvas`/`align_tol`/`margin` | 设计准则（对齐/间距/安全区）|
+| `rules` | `report` + `canvas`/`align_tol`/`margin` | 设计准则（对齐/间距/安全区） |
 
 #### 融合引擎（D-S 证据理论）
 
@@ -235,14 +235,14 @@ DeepSeek 综合推理 → 最终答案
 ## 四、验证
 
 | 场景 | 指标 | 结果 |
-|---|---|---|
+| --- | --- | --- |
 | 融合回归 | 10 断言（D-S 数学/匈牙利/冲突/确定性） | 全部通过 |
 | 全功能测试 | 31 项（L0/L1/L2/F1/F2/3D/调度/自诊断） | 31/31 PASS |
 | 亚像素边缘 | 5 偏移场景（0.3/0.5/0.7/1.3px） | 误差 0.0000px |
-| 复杂背景 | saliency 候选区命中有效内容 | score 0.98（精确命中）|
-| 前景分割 | MobileSAM + saliency 联动 | IoU 精确（area_ratio 0.0833=理论值）|
+| 复杂背景 | saliency 候选区命中有效内容 | score 0.98（精确命中） |
+| 前景分割 | MobileSAM + saliency 联动 | IoU 精确（area_ratio 0.0833=理论值） |
 | 并发调度 | 5 任务并发 | 显存峰值 816MB，零 OOM |
-| 全流水线 | analyze（saliency+ascii+stats+ocr+fusion） | 2.9s（GPU）|
+| 全流水线 | analyze（saliency+ascii+stats+ocr+fusion） | 2.9s（GPU） |
 | 涡扇 3D | 196 物体 / 16110 对 | 4 真干涉 + 1056 已验证间隙 |
 
 ```bash
@@ -257,7 +257,7 @@ mamba run -n pi-vision python -u tests/run_full_test.py
 三 conda env 隔离（互不污染）：
 
 | env | 内容 | 用途 |
-|---|---|---|
+| --- | --- | --- |
 | `pi-vision` | python 3.12 + rapidocr/paddle/playwright/scipy | L1 确定性测量 + F1 融合 |
 | `vsensor` | GPU torch cu124 + skimage + onnxruntime-gpu + vtracer + mobile-sam | L2 轻量 DL 传感器 |
 | `omniparser` | CPU torch + OmniParser/OWLv2/CLIP | detect/omniparser/cluster |

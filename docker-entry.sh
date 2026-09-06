@@ -15,13 +15,15 @@ fi
 
 # 直接脚本路径
 if [ -f "$TOOLS/$1" ]; then
-  SCRIPT="$1"; shift
+  SCRIPT="$1"
+  shift
   exec python -u "$TOOLS/$SCRIPT" "$@"
 fi
 
-ACTION="$1"; shift
+ACTION="$1"
+shift
 case "$ACTION" in
-  env) exec python -u -c "import PIL,numpy,onnxruntime,rapidocr,pptx,fitz,mss,torch,transformers,ultralytics,paddle,paddleocr,paddlex,open_clip; import sys; print('python', sys.version.split()[0], '| all deps OK')" ;;
-  capture) exec python -u "$TOOLS/vs_capture.py" "$@" ;;
-  *) exec python -u "$TOOLS/vs_${ACTION}.py" "$@" ;;
+env) exec python -u -c "import PIL,numpy,onnxruntime,rapidocr,pptx,fitz,mss,torch,transformers,ultralytics,paddle,paddleocr,paddlex,open_clip; import sys; print('python', sys.version.split()[0], '| all deps OK')" ;;
+capture) exec python -u "$TOOLS/vs_capture.py" "$@" ;;
+*) exec python -u "$TOOLS/vs_${ACTION}.py" "$@" ;;
 esac

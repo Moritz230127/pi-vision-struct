@@ -40,7 +40,7 @@ if [ -f "$CFG" ] && grep -q 'omniparser/weights/icon_caption_florence' "$CFG" 2>
 else
     echo "  [MISS] config.json 本地路径"
     if [ "$CHECK_ONLY" = 0 ]; then
-        "$PY" - << 'EOF'
+        "$PY" - <<'EOF'
 import json, os
 p = os.path.expanduser("~/.cache/omniparser/weights/icon_caption_florence/config.json")
 with open(p) as f:
@@ -62,7 +62,7 @@ if [ -f "$MODELING" ] && grep -q "Compatibility fix (transformers >= 4.4x)" "$MO
 else
     echo "  [MISS] modeling_florence2.py 掩码补丁"
     if [ "$CHECK_ONLY" = 0 ]; then
-        "$PY" - << 'EOF'
+        "$PY" - <<'EOF'
 import os, re
 p = os.path.expanduser("~/.cache/omniparser/transformers_modules/transformers_modules/icon_caption_florence/modeling_florence2.py")
 with open(p) as f:

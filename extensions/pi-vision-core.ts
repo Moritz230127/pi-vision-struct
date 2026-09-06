@@ -28,7 +28,10 @@ const PY = (name: string) => `${PKG_ROOT}python/${name}`;
 export const VERSION: string = (() => {
 	try {
 		const pkg = JSON.parse(
-			readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf-8"),
+			readFileSync(
+				fileURLToPath(new URL("../package.json", import.meta.url)),
+				"utf-8",
+			),
 		);
 		return String(pkg.version ?? "2.2.2");
 	} catch {
@@ -42,8 +45,8 @@ const isWin = process.platform === "win32";
 const BIN = isWin ? "Scripts" : "bin";
 const EXE = isWin ? ".exe" : "";
 const CONFIG_DIR = isWin
-	? process.env.APPDATA ?? `${HOME}/AppData/Roaming`
-	: process.env.XDG_CONFIG_HOME ?? `${HOME}/.config`;
+	? (process.env.APPDATA ?? `${HOME}/AppData/Roaming`)
+	: (process.env.XDG_CONFIG_HOME ?? `${HOME}/.config`);
 const CONFIG_FILE = `${CONFIG_DIR}/pi-vision-struct.json`;
 
 function readConfig(): Record<string, string> {
@@ -70,9 +73,12 @@ function candidatePython(envName: string): string[] {
 function resolvePython(envName: string, envVar: string): string {
 	if (process.env[envVar]) return process.env[envVar]!;
 	const cfg = readConfig();
-	const key = envName === "pi-vision" ? "pi_vision_python"
-		: envName === "vsensor" ? "vsensor_python"
-		: "omniparser_python";
+	const key =
+		envName === "pi-vision"
+			? "pi_vision_python"
+			: envName === "vsensor"
+				? "vsensor_python"
+				: "omniparser_python";
 	if (cfg[key] && existsSync(cfg[key]!)) return cfg[key]!;
 	for (const c of candidatePython(envName)) {
 		if (existsSync(c)) return c;
@@ -204,39 +210,39 @@ function runPython(
 			}
 		}
 		return await new Promise<string>((resolve) => {
-		// 沙箱: bwrap 内核隔离（--unshare-net 零网络、--ro-bind / 只读根）。
-		// 豁免（sandbox=false）: dom（本职加载用户 URL）/ a11y（会话 DBus）/
-		//   semantic（宿主 Ollama）/ check|setup（需网络安装或读环境）
-		// 非 Linux / 无 bwrap 平台自动无沙箱（配置或 VS_NO_SANDBOX 可禁用）。
-		const useSandbox = SANDBOX_ENABLED && sandbox;
-		const cmd = useSandbox ? BWRAP : pythonBin;
-		const cmdArgs = useSandbox ? [pythonBin, ...args] : args;
-		const tool = args[0] ? args[0].split("/").pop() ?? args[0] : pythonBin;
-		execFile(
-			cmd,
-			cmdArgs,
-			{ timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 },
-			(err, stdout, stderr) => {
-				if (err) {
-					logFailure(tool, args, String(stderr || err.message || err));
-					resolve(
-						JSON.stringify({
-							error: "python failed",
-							code: err.code ?? null,
-							detail: String(stderr || err.message || err).slice(0, 500),
-						}),
-					);
-				} else {
-					const out = stdout.trim();
-					if (out.startsWith("{") && out.includes('"error"')) {
-						logFailure(tool, args, out.slice(0, 300));
-					}
-					resolve(out);
+			// 沙箱: bwrap 内核隔离（--unshare-net 零网络、--ro-bind / 只读根）。
+			// 豁免（sandbox=false）: dom（本职加载用户 URL）/ a11y（会话 DBus）/
+			//   semantic（宿主 Ollama）/ check|setup（需网络安装或读环境）
+			// 非 Linux / 无 bwrap 平台自动无沙箱（配置或 VS_NO_SANDBOX 可禁用）。
+			const useSandbox = SANDBOX_ENABLED && sandbox;
+			const cmd = useSandbox ? BWRAP : pythonBin;
+			const cmdArgs = useSandbox ? [pythonBin, ...args] : args;
+			const tool = args[0] ? (args[0].split("/").pop() ?? args[0]) : pythonBin;
+			execFile(
+				cmd,
+				cmdArgs,
+				{ timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 },
+				(err, stdout, stderr) => {
+					if (err) {
+						logFailure(tool, args, String(stderr || err.message || err));
+						resolve(
+							JSON.stringify({
+								error: "python failed",
+								code: err.code ?? null,
+								detail: String(stderr || err.message || err).slice(0, 500),
+							}),
+						);
+					} else {
+						const out = stdout.trim();
+						if (out.startsWith("{") && out.includes('"error"')) {
+							logFailure(tool, args, out.slice(0, 300));
+						}
+						resolve(out);
 					}
 				},
 			);
-			});
-		})();
+		});
+	})();
 }
 
 interface Act {
@@ -248,12 +254,20 @@ interface Act {
 	sandbox?: boolean; // 默认 true（bwrap 隔离）; false = 豁免（见上）
 }
 
-function flag(p: Record<string, string>, k: string, flagName: string): string[] {
+function flag(
+	p: Record<string, string>,
+	k: string,
+	flagName: string,
+): string[] {
 	const v = p[k];
 	return v === undefined ? [] : [flagName, String(v)];
 }
 
-function list(p: Record<string, string>, k: string, flagName: string): string[] {
+function list(
+	p: Record<string, string>,
+	k: string,
+	flagName: string,
+): string[] {
 	const v = p[k];
 	if (v === undefined || v === "") return [];
 	return [flagName, ...v.split(",").filter(Boolean)];
@@ -279,10 +293,7 @@ const MEASURE: Record<string, Act> = {
 	capture: {
 		script: "vs_capture.py",
 		timeout: T.fast,
-		build: (p) => [
-			...flag(p, "out", "--out"),
-			...flag(p, "region", "--region"),
-		],
+		build: (p) => [...flag(p, "out", "--out"), ...flag(p, "region", "--region")],
 	},
 	pixels: {
 		script: "vs_pix.py",
@@ -523,9 +534,7 @@ const FUSE: Record<string, Act> = {
 	fusion: {
 		script: "vs_fusion.py",
 		timeout: T.short,
-		build: (p) => [
-			...flag(p, "reports", "--reports"),
-		],
+		build: (p) => [...flag(p, "reports", "--reports")],
 	},
 	zoom: {
 		script: "vs_protocol.py",
@@ -550,9 +559,7 @@ const FUSE: Record<string, Act> = {
 		script: "blender_dump_wrapper.sh",
 		bin: "bash",
 		timeout: T.heavy,
-		build: (p) => [
-			...flag(p, "blend", "--blend"),
-		],
+		build: (p) => [...flag(p, "blend", "--blend")],
 	},
 	depth: {
 		script: "depth_geom_wrapper.sh",
@@ -637,8 +644,12 @@ async function dispatch(
 		Object.entries(params).map(([k, v]) => [k, String(v)]),
 	);
 	const out = act.inline
-		? await runPython(act.bin ?? DEFAULT_PYTHON, ["-c", act.inline], act.timeout,
-						   act.sandbox ?? true)
+		? await runPython(
+				act.bin ?? DEFAULT_PYTHON,
+				["-c", act.inline],
+				act.timeout,
+				act.sandbox ?? true,
+			)
 		: await runPython(
 				act.bin ?? DEFAULT_PYTHON,
 				[PY(act.script ?? ""), ...act.build(p)],
@@ -674,7 +685,11 @@ async function gitIntegrity(): Promise<string> {
 			),
 		);
 		const state =
-			dirty < 0 ? "状态未知" : dirty === 0 ? "工作树干净" : `${dirty} 处未提交改动`;
+			dirty < 0
+				? "状态未知"
+				: dirty === 0
+					? "工作树干净"
+					: `${dirty} 处未提交改动`;
 		return `git: ${desc} (${state})`;
 	} catch {
 		return "git: 不可用";
@@ -683,7 +698,15 @@ async function gitIntegrity(): Promise<string> {
 
 // ---------- 导出（双宿主共用）----------
 
-export { PKG_ROOT, PY, DEFAULT_PYTHON, OMNI_PYTHON, VSENSOR_PYTHON, SANDBOX_ENABLED, BWRAP };
+export {
+	PKG_ROOT,
+	PY,
+	DEFAULT_PYTHON,
+	OMNI_PYTHON,
+	VSENSOR_PYTHON,
+	SANDBOX_ENABLED,
+	BWRAP,
+};
 export { runPython, gitIntegrity, preflight, resolvePython };
 export { dispatch };
 export { T };
@@ -695,69 +718,169 @@ export type { Act };
  */
 export const vsParamType = Type.Object({
 	action: Type.Union([
-		Type.Literal("capture"), Type.Literal("pixels"), Type.Literal("ocr"),
-		Type.Literal("wallpaper"), Type.Literal("scene_stats"), Type.Literal("env"),
-		Type.Literal("dom"), Type.Literal("pptx"), Type.Literal("omniparser"),
-		Type.Literal("layout"), Type.Literal("pdf"), Type.Literal("a11y"),
-		Type.Literal("analyze"), Type.Literal("audit"),
-		Type.Literal("rules"), Type.Literal("cluster"),
+		Type.Literal("capture"),
+		Type.Literal("pixels"),
+		Type.Literal("ocr"),
+		Type.Literal("wallpaper"),
+		Type.Literal("scene_stats"),
+		Type.Literal("env"),
+		Type.Literal("dom"),
+		Type.Literal("pptx"),
+		Type.Literal("omniparser"),
+		Type.Literal("layout"),
+		Type.Literal("pdf"),
+		Type.Literal("a11y"),
+		Type.Literal("analyze"),
+		Type.Literal("audit"),
+		Type.Literal("rules"),
+		Type.Literal("cluster"),
 		Type.Literal("detect"),
-		Type.Literal("blender_dump"), Type.Literal("depth"), Type.Literal("depth_midas"), Type.Literal("audit3d"),
-		Type.Literal("saliency"), Type.Literal("segment"), Type.Literal("edge"),
-		Type.Literal("ascii"), Type.Literal("geometry"), Type.Literal("fusion"),
-		Type.Literal("zoom"), Type.Literal("probe"),
-		Type.Literal("check"), Type.Literal("setup"),
+		Type.Literal("blender_dump"),
+		Type.Literal("depth"),
+		Type.Literal("depth_midas"),
+		Type.Literal("audit3d"),
+		Type.Literal("saliency"),
+		Type.Literal("segment"),
+		Type.Literal("edge"),
+		Type.Literal("ascii"),
+		Type.Literal("geometry"),
+		Type.Literal("fusion"),
+		Type.Literal("zoom"),
+		Type.Literal("probe"),
+		Type.Literal("check"),
+		Type.Literal("setup"),
 	]),
 	out: Type.Optional(Type.String({ description: "截屏输出路径（capture）" })),
-	image: Type.Optional(Type.String({ description: "图片路径（pixels/ocr等多数动作）" })),
-	region: Type.Optional(Type.String({ description: "区域 x1,y1,x2,y2（capture/ocr/pixels）" })),
-	colors: Type.Optional(Type.Number({ description: "主色数（pixels/wallpaper）" })),
+	image: Type.Optional(
+		Type.String({ description: "图片路径（pixels/ocr等多数动作）" }),
+	),
+	region: Type.Optional(
+		Type.String({ description: "区域 x1,y1,x2,y2（capture/ocr/pixels）" }),
+	),
+	colors: Type.Optional(
+		Type.Number({ description: "主色数（pixels/wallpaper）" }),
+	),
 	compare: Type.Optional(Type.String({ description: "对比图（pixels diff）" })),
-	wcag: Type.Optional(Type.String({ description: "前景hex,背景hex…（pixels WCAG）" })),
+	wcag: Type.Optional(
+		Type.String({ description: "前景hex,背景hex…（pixels WCAG）" }),
+	),
 	threshold: Type.Optional(Type.Number({ description: "diff阈值30/聚类0.75" })),
-	dir: Type.Optional(Type.String({ description: "图片目录（wallpaper/cluster）" })),
+	dir: Type.Optional(
+		Type.String({ description: "图片目录（wallpaper/cluster）" }),
+	),
 	ext: Type.Optional(Type.String({ description: "扩展名列表（wallpaper）" })),
-	max_files: Type.Optional(Type.Number({ description: "最多文件（wallpaper/cluster，默认200）" })),
-	prompt: Type.Optional(Type.String({ description: "提示词（semantic/chart_data 语义兜底）" })),
-	model: Type.Optional(Type.String({ description: "VLM 模型（semantic 兜底，默认取配置 l2_model）" })),
-	enable: Type.Optional(Type.Boolean({ description: "开启 L2/VLM（wallpaper/chart_data语义）" })),
+	max_files: Type.Optional(
+		Type.Number({ description: "最多文件（wallpaper/cluster，默认200）" }),
+	),
+	prompt: Type.Optional(
+		Type.String({ description: "提示词（semantic/chart_data 语义兜底）" }),
+	),
+	model: Type.Optional(
+		Type.String({
+			description: "VLM 模型（semantic 兜底，默认取配置 l2_model）",
+		}),
+	),
+	enable: Type.Optional(
+		Type.Boolean({ description: "开启 L2/VLM（wallpaper/chart_data语义）" }),
+	),
 	upscale: Type.Optional(Type.Number({ description: "OCR 放大倍数（默认2）" })),
-	max_items: Type.Optional(Type.Number({ description: "最多条目（ocr/omniparser/layout/pdf）" })),
-	min_conf: Type.Optional(Type.Number({ description: "最低置信度（ocr/layout）" })),
-	backend: Type.Optional(Type.String({ description: "OCR 后端 rapidocr|paddle（ocr）" })),
-	preprocess: Type.Optional(Type.String({ description: "none|contrast（ocr）" })),
-	daemon: Type.Optional(Type.String({ description: "auto|always|never（ocr paddle 常驻）" })),
-	blend: Type.Optional(Type.String({ description: "Blender 文件路径（blender_dump/depth）" })),
-	camera: Type.Optional(Type.String({ description: "摄像机名称（depth blender-zpass）" })),
-	output: Type.Optional(Type.String({ description: "输出 JSON 路径（blender_dump/depth）" })),
-	gap_threshold: Type.Optional(Type.Number({ description: "间隙阈值 mm（audit3d，默认15）" })),
-	method: Type.Optional(Type.String({ description: "精度档（audit3d）：auto=OBB-SAT+网格KDTree最大精度 / obb=仅有向包围盒分离轴 / mesh=仅点云距离 / aabb=原AABB回退" })),
+	max_items: Type.Optional(
+		Type.Number({ description: "最多条目（ocr/omniparser/layout/pdf）" }),
+	),
+	min_conf: Type.Optional(
+		Type.Number({ description: "最低置信度（ocr/layout）" }),
+	),
+	backend: Type.Optional(
+		Type.String({ description: "OCR 后端 rapidocr|paddle（ocr）" }),
+	),
+	preprocess: Type.Optional(
+		Type.String({ description: "none|contrast（ocr）" }),
+	),
+	daemon: Type.Optional(
+		Type.String({ description: "auto|always|never（ocr paddle 常驻）" }),
+	),
+	blend: Type.Optional(
+		Type.String({ description: "Blender 文件路径（blender_dump/depth）" }),
+	),
+	camera: Type.Optional(
+		Type.String({ description: "摄像机名称（depth blender-zpass）" }),
+	),
+	output: Type.Optional(
+		Type.String({ description: "输出 JSON 路径（blender_dump/depth）" }),
+	),
+	gap_threshold: Type.Optional(
+		Type.Number({ description: "间隙阈值 mm（audit3d，默认15）" }),
+	),
+	method: Type.Optional(
+		Type.String({
+			description:
+				"精度档（audit3d）：auto=OBB-SAT+网格KDTree最大精度 / obb=仅有向包围盒分离轴 / mesh=仅点云距离 / aabb=原AABB回退",
+		}),
+	),
 	url: Type.Optional(Type.String({ description: "URL（dom；analyze 可选）" })),
-	max_elements: Type.Optional(Type.Number({ description: "最多元素（dom/a11y，默认60/80）" })),
-	screenshot: Type.Optional(Type.String({ description: "DOM 会话截图输出（dom）" })),
+	max_elements: Type.Optional(
+		Type.Number({ description: "最多元素（dom/a11y，默认60/80）" }),
+	),
+	screenshot: Type.Optional(
+		Type.String({ description: "DOM 会话截图输出（dom）" }),
+	),
 	file: Type.Optional(Type.String({ description: "pptx/pdf 文件路径" })),
-	max_shapes: Type.Optional(Type.Number({ description: "最多形状（pptx，默认200）" })),
+	max_shapes: Type.Optional(
+		Type.Number({ description: "最多形状（pptx，默认200）" }),
+	),
 	slide: Type.Optional(Type.Number({ description: "仅导出第 N 张（pptx）" })),
-	no_ocr: Type.Optional(Type.Boolean({ description: "跳过 OCR 仅图标（omniparser）" })),
-	pages: Type.Optional(Type.String({ description: "PDF 页范围 1-3/all（pdf）" })),
+	no_ocr: Type.Optional(
+		Type.Boolean({ description: "跳过 OCR 仅图标（omniparser）" }),
+	),
+	pages: Type.Optional(
+		Type.String({ description: "PDF 页范围 1-3/all（pdf）" }),
+	),
 	render_dir: Type.Optional(Type.String({ description: "渲染输出目录（pdf）" })),
 	app: Type.Optional(Type.String({ description: "应用名过滤（a11y）" })),
 	list: Type.Optional(Type.Boolean({ description: "仅列应用（a11y）" })),
 	with_text: Type.Optional(Type.Boolean({ description: "抓文本内容（a11y）" })),
-	task: Type.Optional(Type.String({ description: "预置任务配置名（analyze）：diagnose-screenshot / audit-pptx / classify-images / diff-screenshots。非自由文本" })),
-	input: Type.Optional(Type.String({ description: "输入 图片/pptx/目录（analyze）" })),
-	setup_args: Type.Optional(Type.String({ description: "setup 动作参数：留空=--dry-run；可传 --with-omniparser / --with-dom 等（setup 自带 vs_setup.py 预检豁免）" })),
+	task: Type.Optional(
+		Type.String({
+			description:
+				"预置任务配置名（analyze）：diagnose-screenshot / audit-pptx / classify-images / diff-screenshots。非自由文本",
+		}),
+	),
+	input: Type.Optional(
+		Type.String({ description: "输入 图片/pptx/目录（analyze）" }),
+	),
+	setup_args: Type.Optional(
+		Type.String({
+			description:
+				"setup 动作参数：留空=--dry-run；可传 --with-omniparser / --with-dom 等（setup 自带 vs_setup.py 预检豁免）",
+		}),
+	),
 	dpr: Type.Optional(Type.Number({ description: "DPR（默认1.0）" })),
-	dom: Type.Optional(Type.String({ description: "dom 报告 JSON（crosscheck）" })),
-	ocr: Type.Optional(Type.String({ description: "ocr 报告 JSON（crosscheck）" })),
-	color_threshold: Type.Optional(Type.Number({ description: "ΔE 阈值（crosscheck，默认5）" })),
-	report: Type.Optional(Type.String({ description: "报告 JSON（audit/rules）" })),
+	dom: Type.Optional(
+		Type.String({ description: "dom 报告 JSON（crosscheck）" }),
+	),
+	ocr: Type.Optional(
+		Type.String({ description: "ocr 报告 JSON（crosscheck）" }),
+	),
+	color_threshold: Type.Optional(
+		Type.Number({ description: "ΔE 阈值（crosscheck，默认5）" }),
+	),
+	report: Type.Optional(
+		Type.String({ description: "报告 JSON（audit/rules）" }),
+	),
 	canvas: Type.Optional(Type.String({ description: "画布 WxH（audit/rules）" })),
-	overlap_threshold: Type.Optional(Type.Number({ description: "IoU 阈值（audit，默认0.05）" })),
-	align_tol: Type.Optional(Type.Number({ description: "对齐容差 px（rules，默认4）" })),
+	overlap_threshold: Type.Optional(
+		Type.Number({ description: "IoU 阈值（audit，默认0.05）" }),
+	),
+	align_tol: Type.Optional(
+		Type.Number({ description: "对齐容差 px（rules，默认4）" }),
+	),
 	margin: Type.Optional(Type.Number({ description: "边距 px（rules）" })),
-	files: Type.Optional(Type.String({ description: "逗号分隔文件列表，与dir二选一（cluster）" })),
-	classes: Type.Optional(Type.String({ description: "逗号分隔类别（detect 开放词表）" })),
+	files: Type.Optional(
+		Type.String({ description: "逗号分隔文件列表，与dir二选一（cluster）" }),
+	),
+	classes: Type.Optional(
+		Type.String({ description: "逗号分隔类别（detect 开放词表）" }),
+	),
 });
 
 /**
@@ -793,10 +916,10 @@ export function toMcpJsonSchema(t: ReturnType<typeof Type.Object>): {
  * 工具描述文案（双宿主共用，单一来源）；补 check/setup 一行。
  */
 export const VS_DESCRIPTION =
-	"数理化视觉套件（v2.2.2）25动作。全部输出为精确数值/坐标/hex/矩阵，零主观描述。\n"
-	+ "测量：capture截图(out)/pixels取色(image,region,colors)/ocr文字坐标(image)/wallpaper(dir)/scene_stats数理统计(image)/env。\n"
-	+ "结构：dom(url)/pptx(file)/omniparser(image)/layout(image)/pdf(file)/a11y(app,list)/detect(image,classes,阈值)。\n"
-	+ "三维：blender_dump(blend)→场景图4×4矩阵+8点bbox3d/depth(blend+image)→深度矩阵→mm统计/audit3d(report,阈值mm)→间隙/干涉。\n"
-	+ "融合：analyze(task)/crosscheck互验(image)/audit(report)/rules(report)。CLIP聚类(dir)。\n"
-	+ "自检：check（只读环境自检）/setup（安装，setup_args 传 --with-omniparser 等）。\n"
-	+ "原则：先capture后分析；所有输出带单位；数值推理由DeepSeek执行。";
+	"数理化视觉套件（v2.2.2）25动作。全部输出为精确数值/坐标/hex/矩阵，零主观描述。\n" +
+	"测量：capture截图(out)/pixels取色(image,region,colors)/ocr文字坐标(image)/wallpaper(dir)/scene_stats数理统计(image)/env。\n" +
+	"结构：dom(url)/pptx(file)/omniparser(image)/layout(image)/pdf(file)/a11y(app,list)/detect(image,classes,阈值)。\n" +
+	"三维：blender_dump(blend)→场景图4×4矩阵+8点bbox3d/depth(blend+image)→深度矩阵→mm统计/audit3d(report,阈值mm)→间隙/干涉。\n" +
+	"融合：analyze(task)/crosscheck互验(image)/audit(report)/rules(report)。CLIP聚类(dir)。\n" +
+	"自检：check（只读环境自检）/setup（安装，setup_args 传 --with-omniparser 等）。\n" +
+	"原则：先capture后分析；所有输出带单位；数值推理由DeepSeek执行。";

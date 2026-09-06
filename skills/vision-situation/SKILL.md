@@ -10,7 +10,7 @@
 ## 一、任务 → action 决策表
 
 | 任务 | action |
-|---|---|
+| --- | --- |
 | 截屏 / 取色 / 颜色直方图 / 双图 diff / 对比度 | `pixels`（截图先 `capture`） |
 | 图片/截图里的文字 + 精确坐标 | `ocr` |
 | 网页 DOM 结构（无需截图的布局真值） | `dom`（需 URL） |
@@ -47,6 +47,7 @@
 ## 二、action 参考
 
 ### 测量（pi-vision env，多数走 bwrap）
+
 - `capture`：`out` 必填（PNG 路径）、可选 `region`。grim 截屏
 - `pixels`：`image` 必填；`regions`/`compare`(diff)/`colors`/`wcag`/`threshold`(默认30)。**SLIC 超像素主色、精确 hex+百分比、ΔE、对比度**
 - `ocr`：`image` 必填；`region`/`upscale`/`max_items`/`min_conf`/`backend`(rapidocr 默认 ~2-5s | paddle 高召回)/`preprocess`(contrast 低对比度用)/`daemon`。**text+4点bbox+conf+词典纠错**
@@ -54,6 +55,7 @@
 - `env`：环境自检（无参数）
 
 ### 结构（L0 + DL 感知）
+
 - `dom`：`url` 必填；`max_elements`(默认60)、`screenshot`。**DOM+computed style：tag/role/text/bbox/color/font/z-index**
 - `pptx`：`file` 必填；`max_shapes`、`slide`。**pt 坐标、填充 hex、字号/色**
 - `omniparser`：`image` 必填；`max_items`、`no_ocr`。**图标级元素 + Florence-2 语义；本地常驻服务自动拉起**
@@ -62,6 +64,7 @@
 - `a11y`：可选 `app`/`list=true`/`max_elements`(默认80)/`with_text`。**AT-SPI 无障碍树：原生应用的 DOM 等价物，screen_px 坐标**
 
 ### L2 轻量感知（vsensor env，GPU）
+
 - `saliency`：`image` 必填；`top_n`(默认5)、`min_score`(默认0.3)、`device`(cuda/cpu)。**U²-Net 显著性 → top-N 候选区域 bbox+score（复杂背景"看哪里"）**
 - `segment`：`image` 必填；`saliency`(联动报告 JSON，box 提示)、`device`。**MobileSAM 前景分割 → 前景 bbox+面积比+实例数**
 - `depth_midas`：`image` 必填；`region`、`device`。**MiDaS 单目深度 → 近/中/远分布 + 区域深度**
@@ -70,6 +73,7 @@
 - `geometry`：`image` 必填；`max_shapes`(默认50)。**VTracer SVG 化 → 形状原语（矩形/圆/多边形）**
 
 ### 融合（F1 引擎 + F2 协议；pi-vision env）
+
 - `fusion`：`reports`(多传感器 JSON 路径) 必填。**D-S 证据融合：匈牙利匹配 → mass 组合 → belief/plausibility/uncertainty → verdict**
 - `analyze`：`image` 必填（多轮协议粗报告）；或 `task` 必填（diagnose-screenshot/audit-pptx/classify-images/diff-screenshots）
 - `zoom`：`image`+`region`(x1,y1,x2,y2) 必填。**细报告：区域 OCR 高倍 + edge 亚像素 + depth + segment 前景**
@@ -79,9 +83,11 @@
 - `audit3d`：`report`(blender_dump 场景图) 必填；`gap_threshold`(默认15mm)、`method`(auto/obb/mesh/aabb)。**3D 间隙/干涉，最大精度档（OBB-SAT+网格点云 KDTree，multiprocessing 并行）**
 
 ### 理解扩展
+
 - `detect`：`image`+`classes`(逗号分隔开放词表) 必填；`threshold`(默认0.25)、`max_items`。**OWLv2 zero-shot 物体检测，image_px bbox；注意：只能检测提供的类别，类别词选择影响结果**
 
 ### 聚类（omniparser env）
+
 - `cluster`：`dir` 或 `files`(逗号分隔)；`threshold`(默认0.75)、`max_files`。**CLIP ViT-B-32 输出 clusters[]+top_pairs[]**
 
 ## 三、输出解读要点

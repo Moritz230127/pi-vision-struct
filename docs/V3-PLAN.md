@@ -17,6 +17,7 @@
 ```
 
 **每步固定交付物**：
+
 1. 设计方案（本 PLAN 已含，实施时细化）
 2. 代码实现
 3. 印证方案执行结果（测试/基准/压测）
@@ -29,7 +30,7 @@
 ## 1. 阶段总览
 
 | 阶段 | 内容 | 门禁 |
-|---|---|---|
+| --- | --- | --- |
 | S0 | 环境基线（vsensor env + GPU + 权重） | GPU 可用 + 三 env 隔离 |
 | S1 | 融合引擎（D-S + 匈牙利 + 不确定性） | 单元测试 + 误报率对比 |
 | S2 | 新传感器（saliency/segment/depth/edge/ascii/geometry） | 各传感器基准卡 |
@@ -43,9 +44,11 @@
 ## 2. S0 环境基线
 
 ### 2.1 设计方案
+
 新建 `vsensor` conda env（GPU torch + skimage + onnxruntime），与 pi-vision（确定性）、omniparser（CPU DL）三 env 隔离。下载 U²-Net / MobileSAM / MiDaS-small 权重到本地缓存。
 
 ### 2.2 架构逻辑
+
 ```
 vsensor env (GPU torch cu124)  ← L2 轻量 DL 传感器
 pi-vision env (确定性算法)      ← L1 测量 + F1 融合
@@ -54,6 +57,7 @@ omniparser env (CPU torch)     ← detect/omniparser（保留）
 ```
 
 ### 2.3 技术实现
+
 - [ ] `conda create -n vsensor python=3.12`
 - [ ] `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124`
 - [ ] `pip install scikit-image onnxruntime pillow numpy`
@@ -62,14 +66,16 @@ omniparser env (CPU torch)     ← detect/omniparser（保留）
 - [ ] 验证：`torch.cuda.is_available() == True`，`torch.cuda.get_device_name()`
 
 ### 2.4 工程收敛边际
+
 - vsensor env 创建成功，GPU torch 可用
 - 三 env 互不污染（vsensor 不装 paddle/playwright；pi-vision 不装 torch）
 - 权重全部下载到本地缓存（离线可用）
 - vtracer 可执行
 
 ### 2.5 印证方案
+
 | # | 印证项 | 通过标准 |
-|---|---|---|
+| --- | --- | --- |
 | S0-1 | `torch.cuda.is_available()` | True |
 | S0-2 | GPU 名称 | "NVIDIA GeForce RTX 4060 Laptop GPU" |
 | S0-3 | 三 env 隔离 | vsensor 无 paddle；pi-vision 无 torch |
@@ -83,9 +89,11 @@ omniparser env (CPU torch)     ← detect/omniparser（保留）
 ## 3. S1 融合引擎（核心）
 
 ### 3.1 设计方案
+
 `vs_fusion.py`：多传感器证据融合。输入 schema v3 元素（带 conf），输出 findings（belief/plausibility/uncertainty/verdict）。三阶段：align（匈牙利匹配）→ evidence（mass 映射）→ combine（D-S 组合）。
 
 ### 3.2 架构逻辑
+
 ```
 输入: [{sensor, bbox, conf, text/color/...}, ...]
   ↓ align: 代价矩阵 C[i][j] = 1 - IoU - α·text_sim
@@ -97,6 +105,7 @@ omniparser env (CPU torch)     ← detect/omniparser（保留）
 ```
 
 ### 3.3 技术实现
+
 - [ ] `vs_fusion.py`：mass 映射表（§3.1.1 设计文档）+ D-S 组合 + 匈牙利匹配
 - [ ] K 冲突系数上限保护（K>0.95 → needs_review）
 - [ ] 不确定性传播：`uncertainty = 1 - (belief - plausibility)`
@@ -104,14 +113,16 @@ omniparser env (CPU torch)     ← detect/omniparser（保留）
 - [ ] 与旧 vs_crosscheck 对比基准（同图误报率）
 
 ### 3.4 工程收敛边际
+
 - vs_fusion.py 独立可运行（CLI + 库接口）
 - 不依赖任何 DL 模型（纯算法）
 - 旧 vs_crosscheck.py 暂保留（S4 删除），用于对比
 - 输出 schema v3 findings 结构
 
 ### 3.5 印证方案
+
 | # | 印证项 | 通过标准 |
-|---|---|---|
+| --- | --- | --- |
 | S1-1 | D-S 组合数学 | 已知 mass 输入 → 手算期望输出一致 |
 | S1-2 | 匈牙利匹配 | 合成 10 对 bbox → 全局最优匹配（无重复） |
 | S1-3 | 冲突处理 | K>0.95 → needs_review 而非误报 |
@@ -125,9 +136,11 @@ omniparser env (CPU torch)     ← detect/omniparser（保留）
 ## 4. S2 新传感器（6 个）
 
 ### 4.1 设计方案
+
 6 个新传感器，全部输出 schema v3 元素/证据。DL 传感器（saliency/segment/depth）跑 vsensor env GPU；纯算法（edge/ascii/geometry）跑 pi-vision env。
 
 ### 4.2 架构逻辑
+
 ```
 vs_saliency.py  U²-Net → 显著性图 → top-N 候选区域 bbox + score
 vs_segment.py   MobileSAM → 前景 mask → bbox + 面积比 + 实例数
@@ -138,6 +151,7 @@ vs_geometry.py  VTracer → SVG → 形状原语（圆/矩形/线段/多边形�
 ```
 
 ### 4.3 技术实现
+
 - [ ] `vs_saliency.py`：U²-Net 推理（GPU），`--top-n 5` 候选区
 - [ ] `vs_segment.py`：MobileSAM 推理（GPU），`--point-prompt` 可选
 - [ ] `vs_depth.py`：MiDaS ONNX 推理，输出深度分位数
@@ -147,14 +161,16 @@ vs_geometry.py  VTracer → SVG → 形状原语（圆/矩形/线段/多边形�
 - [ ] 各传感器基准卡：精度/延迟/VRAM
 
 ### 4.4 工程收敛边际
+
 - 每传感器独立 CLI + 库接口，可单独调用
 - DL 传感器默认走 vsd daemon（S3 前先直连）
 - 输出全部 schema v3 元素结构
 - 不引入 >25M 参数模型
 
 ### 4.5 印证方案
+
 | # | 印证项 | 通过标准 |
-|---|---|---|
+| --- | --- | --- |
 | S2-1 | saliency 候选区 | 复杂背景图 top-5 命中有效内容 ≥80%（人工标注） |
 | S2-2 | segment 前景 | 前景 mask IoU ≥0.8（标注对比） |
 | S2-3 | depth 输出 | 合成深度图误差 <10%（相对） |
@@ -170,9 +186,11 @@ vs_geometry.py  VTracer → SVG → 形状原语（圆/矩形/线段/多边形�
 ## 5. S3 统一 daemon + 调度（vsd + vsched）
 
 ### 5.1 设计方案
+
 `vsd.py`：单进程管理 L2 全部 DL 模型（GPU 驻留），unix socket 行分隔 JSON。`vsched.py`：显存预算 + 并发信号量 + LRU 淘汰 + 优先级队列 + CPU 降级 + 功耗感知。
 
 ### 5.2 架构逻辑
+
 ```
 请求 → vsched 队列（优先级 analyze>zoom>probe>bg）
      → 显存预算检查（总预算 6.5GB）
@@ -183,6 +201,7 @@ vs_geometry.py  VTracer → SVG → 形状原语（圆/矩形/线段/多边形�
 ```
 
 ### 5.3 技术实现
+
 - [ ] `vsd.py`：模型注册表 + unix socket 服务 + 健康检查 + 自动拉起
 - [ ] `vsched.py`：显存预算表 + 信号量 + LRU + 优先级队列 + 超时保护
 - [ ] 功耗感知：`/sys/class/power_supply/BAT1/status` 轮询（30s）+ 模式切换
@@ -191,14 +210,16 @@ vs_geometry.py  VTracer → SVG → 形状原语（圆/矩形/线段/多边形�
 - [ ] 并发压测脚本 `tests/stress_sched.py`
 
 ### 5.4 工程收敛边际
+
 - vsd/vsched 同进程（避免双进程争显存）
 - 所有 L2 请求必须经 vsched（唯一入口）
 - 显存峰值 ≤6.5GB（8GB 留 1.5GB 安全水位）
 - 任务永不因 OOM 失败（CPU 降级兜底）
 
 ### 5.5 印证方案
+
 | # | 印证项 | 通过标准 |
-|---|---|---|
+| --- | --- | --- |
 | S3-1 | 并发压测 | 5 任务并发，显存峰值 ≤6.5GB，零 OOM |
 | S3-2 | 优先级 | analyze 任务不被 bg 饿死（延迟 <2× 串行） |
 | S3-3 | LRU 淘汰 | 冷模型重载 <3s，热模型 <100ms |
@@ -213,9 +234,11 @@ vs_geometry.py  VTracer → SVG → 形状原语（圆/矩形/线段/多边形�
 ## 6. S4 优化重构 + GPU 加速
 
 ### 6.1 设计方案
+
 5 个现有工具优化 + GPU 加速清单（§3.9）。全部保持输出兼容（schema v3 元素结构不变，仅内部算法升级）。
 
 ### 6.2 架构逻辑
+
 ```
 vs_pix.py        MEDIANCUT→SLIC+K-means（GPU torch）；BFS→torch 向量化
 vs_scene_stats   median→真 Otsu 多阈值（GPU）
@@ -226,6 +249,7 @@ GPU 加速: 量化/连通域/边缘/直方图/OCR 预处理/点云 → torch
 ```
 
 ### 6.3 技术实现
+
 - [ ] `vs_pix.py`：skimage SLIC + torch K-means + torch 连通域
 - [ ] `vs_scene_stats.py`：skimage threshold_otsu 多阈值
 - [ ] `vs_ocr.py`：conf 加权投票 + 词典纠错（编辑距离）
@@ -234,14 +258,16 @@ GPU 加速: 量化/连通域/边缘/直方图/OCR 预处理/点云 → torch
 - [ ] GPU 加速模块 `vs_gpu.py`（torch 工具函数库）
 
 ### 6.4 工程收敛边际
+
 - 输出 schema 与 S1/S2 完全兼容
 - 旧测试（64 断言）中涉及这些工具的用例仍通过（或更新后通过）
 - GPU 加速仅用于大矩阵计算（小矩阵保持 CPU）
 - 删除 vs_crosscheck 前确认 vs_fusion 覆盖其全部功能
 
 ### 6.5 印证方案
+
 | # | 印证项 | 通过标准 |
-|---|---|---|
+| --- | --- | --- |
 | S4-1 | pix 精度 | SLIC 量化 vs MEDIANCUT，主色还原率 ≥95% |
 | S4-2 | pix 性能 | 连通域提速 ≥10×（基准图计时） |
 | S4-3 | scene_stats | Otsu 阈值 vs 旧 median，分割准确率 ↑ |
@@ -256,9 +282,11 @@ GPU 加速: 量化/连通域/边缘/直方图/OCR 预处理/点云 → torch
 ## 7. S5 schema v3 + 多轮协议
 
 ### 7.1 设计方案
+
 schema v3 全量替换 v2（vs_schema.py 重写）。新增 analyze/zoom/probe 三动作（extensions/pi-vision-core.ts），实现多轮反馈协议。
 
 ### 7.2 架构逻辑
+
 ```
 vs analyze [image]  → 粗报告（saliency 候选 + ascii 粗栅格 + 全局统计 + 融合 findings）
 vs zoom [region]    → 细报告（region 内 ocr 高倍 + segment 前景 + edge 亚像素 + depth）
@@ -267,20 +295,23 @@ DeepSeek 驱动多轮：粗看 → 选区 → 细看 → 追问 → 综合推理
 ```
 
 ### 7.3 技术实现
+
 - [ ] `vs_schema.py`：v3 结构（elements/findings/candidates/foreground/metrics/notation）
 - [ ] `extensions/pi-vision-core.ts`：动作表更新（analyze/zoom/probe + 保留旧动作）
 - [ ] `python/tasks/`：新任务配置（diagnose-v3 / zoom / probe）
 - [ ] 端到端测试：真实复杂背景图走完整多轮流程
 
 ### 7.4 工程收敛边际
+
 - schema v2 输出全部升级 v3（无 v2 残留）
 - 旧动作（capture/pix/ocr/dom 等）仍可用（内部走新管线）
 - analyze/zoom/probe 三动作可用
 - DeepSeek 可通过工具调用驱动多轮
 
 ### 7.5 印证方案
+
 | # | 印证项 | 通过标准 |
-|---|---|---|
+| --- | --- | --- |
 | S5-1 | schema 合规 | 全部输出 schema==vision-report/v3 |
 | S5-2 | 多轮流程 | 真实复杂图：analyze→zoom→probe 全链路成功 |
 | S5-3 | 旧动作兼容 | capture/pix/ocr/dom 等旧动作仍工作 |
@@ -293,9 +324,11 @@ DeepSeek 驱动多轮：粗看 → 选区 → 细看 → 追问 → 综合推理
 ## 8. S6 系统整合 + 全量回归
 
 ### 8.1 设计方案
+
 全部模块整合为完整系统：移除 L2 语义层（vs_semantic/vs_critic/vs_vlm），统一配置，全量回归，文档同步。
 
 ### 8.2 架构逻辑
+
 ```
 最终系统:
   vs 单端口 → pi-vision-core.ts → 子进程调度
@@ -306,6 +339,7 @@ DeepSeek 驱动多轮：粗看 → 选区 → 细看 → 追问 → 综合推理
 ```
 
 ### 8.3 技术实现
+
 - [ ] 删除 vs_semantic.py / vs_critic.py / vs_vlm.py
 - [ ] 统一配置 `~/.config/pi-vision-struct.json`（sensors.enabled / power_mode / budgets）
 - [ ] 全量回归：64 断言 + 各阶段印证项重跑
@@ -314,14 +348,16 @@ DeepSeek 驱动多轮：粗看 → 选区 → 细看 → 追问 → 综合推理
 - [ ] git commit + tag v3.0.0
 
 ### 8.4 工程收敛边际
+
 - 零 qwen3-vl 依赖（代码审计确认）
 - 零第三方 API 调用（网络监控确认）
 - 全部输出 schema v3 + 可复算
 - 文档与实现一致
 
 ### 8.5 印证方案
+
 | # | 印证项 | 通过标准 |
-|---|---|---|
+| --- | --- | --- |
 | S6-1 | 全量回归 | 64 断言 + 全部阶段印证项 PASS |
 | S6-2 | 零依赖审计 | grep 无 qwen3-vl/ollama/API 调用 |
 | S6-3 | 端到端 | 3 类真实图（UI/复杂背景/精密零件）全链路成功 |
@@ -336,6 +372,7 @@ DeepSeek 驱动多轮：粗看 → 选区 → 细看 → 追问 → 综合推理
 ## 9. 系统优化与整合（发布后）
 
 发布后进入**系统级优化**阶段（非门禁，持续迭代）：
+
 1. 真实使用数据收集 → 传感器权重调优（阈值/预算）
 2. 性能剖析（cProfile/nvidia-smi）→ 热点优化
 3. 多轮协议体验优化（DeepSeek 调用模式分析）
@@ -355,7 +392,7 @@ DeepSeek 驱动多轮：粗看 → 选区 → 细看 → 追问 → 综合推理
 ## 11. 时间线
 
 | 阶段 | 工期 | 门禁 |
-|---|---|---|
+| --- | --- | --- |
 | S0 | 0.5 天 | GPU + 三 env |
 | S1 | 2 天 | 融合正确性 |
 | S2 | 3 天 | 传感器基准 |

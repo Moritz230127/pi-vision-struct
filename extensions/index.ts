@@ -31,7 +31,10 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 				const setupArgs =
 					rest === "setup"
 						? ["--dry-run"]
-						: rest.replace(/^setup\s*/, "").split(/\s+/).filter(Boolean);
+						: rest
+								.replace(/^setup\s*/, "")
+								.split(/\s+/)
+								.filter(Boolean);
 				ctx.ui.notify(
 					`/vs setup 开始（参数: ${setupArgs.join(" ") || "默认核心"}，安装需数分钟，期间请勿关闭）…`,
 					"info",
@@ -59,10 +62,7 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 						j.ok ? "info" : "error",
 					);
 				} catch {
-					ctx.ui.notify(
-						`pi-vision-struct /vs setup\n${out.slice(0, 500)}`,
-						"error",
-					);
+					ctx.ui.notify(`pi-vision-struct /vs setup\n${out.slice(0, 500)}`, "error");
 				}
 				return;
 			}
