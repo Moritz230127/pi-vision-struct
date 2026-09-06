@@ -35,8 +35,58 @@ SOCKET_PATH = f"{OMNI_DIR}/omniserver.sock"
 MODELS: dict = {}
 
 
+def _apply_florence_patch() -> None:
+    """Re-apply the Florence-2 attention-mask compatibility patch (VIS-P22).
+
+    transformers regenerates the trust_remote_code cache on every model load,
+    overwriting manual edits — so the patch must be re-applied before loading.
+    """
+    p = f"{OMNI_DIR}/transformers_modules/transformers_modules/icon_caption_florence/modeling_florence2.py"
+    if not os.path.exists(p):
+        return
+    with open(p) as f:
+        src = f.read()
+    if "Compatibility fix (transformers >= 4.4x)" in src:
+        return  # already patched
+    old = """        if attention_mask is not None:
+            if attention_mask.size() != (bsz, 1, tgt_len, src_len):
+                raise ValueError(
+                    f"Attention mask should be of size {(bsz, 1, tgt_len, src_len)}, but is {attention_mask.size()}"
+                )
+            attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len) + attention_mask
+            attn_weights = attn_weights.view(bsz * self.num_heads, tgt_len, src_len)"""
+    new = """        if attention_mask is not None:
+            if attention_mask.size() != (bsz, 1, tgt_len, src_len):
+                # Compatibility fix (transformers >= 4.4x): the processor produces a
+                # text-only 4D mask; image tokens are prepended by the model, so the
+                # mask must be expanded to cover them (image part unmasked).
+                if attention_mask.size(-1) < src_len:
+                    pad = src_len - attention_mask.size(-1)
+                    ones = torch.ones(
+                        bsz, 1, tgt_len, pad,
+                        device=attention_mask.device, dtype=attention_mask.dtype,
+                    )
+                    attention_mask = torch.cat([ones, attention_mask], dim=-1)
+                    ones2 = torch.ones(
+                        bsz, 1, pad, src_len,
+                        device=attention_mask.device, dtype=attention_mask.dtype,
+                    )
+                    attention_mask = torch.cat([ones2, attention_mask], dim=-2)
+                else:
+                    raise ValueError(
+                        f"Attention mask should be of size {(bsz, 1, tgt_len, src_len)}, but is {attention_mask.size()}"
+                    )
+            attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len) + attention_mask
+            attn_weights = attn_weights.view(bsz * self.num_heads, tgt_len, src_len)"""
+    if old in src:
+        with open(p, "w") as f:
+            f.write(src.replace(old, new))
+        print("[omniserver] re-applied Florence-2 attention-mask patch")
+
+
 def load_models() -> None:
     """惰性加载（与 vs_omniparser.py 相同的桩/补丁逻辑）。"""
+    _apply_florence_patch()
     sys.path.insert(0, OMNI_DIR)
 
     def _stub(name: str, attrs: dict) -> types.ModuleType:

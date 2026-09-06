@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # repair_omniparser.sh — 重建 OmniParser 权重到 ~/.cache/omniparser（持久目录，走代理 10808）
 set -e
-export HTTPS_PROXY=http://127.0.0.1:10808 HTTP_PROXY=http://127.0.0.1:10808
+export HTTPS_PROXY= HTTP_PROXY=
 OMNI="$HOME/.cache/omniparser"  # 持久目录，重启不丢
 WEIGHTS=$OMNI/weights
 PY=/home/Arch/conda-envs/omniparser/bin/python
