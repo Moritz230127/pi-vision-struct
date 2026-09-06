@@ -17,7 +17,7 @@ ndarray = "0.16"
 rayon = "1"
 vtracer = "1.0.0-alpha.4"
 regex = "1"
-rapidocr-core = "0.2.2"
+rapidocr-core = { path = "vendor/rapidocr-core" }
 landlock = "0.4"
 rustix = "1"
 nix = { version = "0.31", features = ["sched", "mount"] }

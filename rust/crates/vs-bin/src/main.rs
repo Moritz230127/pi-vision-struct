@@ -8,7 +8,9 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use serde_json::json;
-use vs_core::{ascii, audit, edge, fusion, geometry, pix, rules, scene_stats};
+use vs_core::{
+    ascii, audit, depth, edge, fusion, geometry, ocr, pix, rules, saliency, scene_stats, segment,
+};
 
 /// 数理化视觉套件 V4（全面 Rust 重写）。
 #[derive(Parser)]
@@ -100,6 +102,43 @@ enum Command {
         #[arg(long, default_value_t = 50)]
         max_shapes: u32,
     },
+    /// 显著性检测（U²-Net ONNX）。
+    Saliency {
+        #[arg(long)]
+        image: PathBuf,
+        #[arg(long, default_value_t = 5)]
+        top_n: u32,
+        #[arg(long, default_value_t = 0.3)]
+        min_score: f64,
+    },
+    /// 深度估计（MiDaS-small ONNX）。
+    Depth {
+        #[arg(long)]
+        image: PathBuf,
+        #[arg(long, default_value_t = 3)]
+        bins: u32,
+        /// x1,y1,x2,y2 区域深度统计
+        #[arg(long)]
+        region: Option<String>,
+    },
+    /// 实例分割（MobileSAM）。
+    Segment {
+        #[arg(long)]
+        image: PathBuf,
+        #[arg(long, default_value_t = 0.01)]
+        min_area_ratio: f64,
+        #[arg(long, default_value_t = 10)]
+        max_instances: u32,
+    },
+    /// OCR 文本提取（rapidocr-core）。
+    Ocr {
+        #[arg(long)]
+        image: PathBuf,
+        #[arg(long, default_value_t = 100)]
+        max_items: u32,
+        #[arg(long, default_value_t = 0.5)]
+        min_conf: f64,
+    },
 }
 
 fn main() {
@@ -177,6 +216,44 @@ fn main() {
             max_shapes,
         } => geometry::run(&image, &geometry::GeometryParams { mode, max_shapes })
             .unwrap_or_else(|e| json!({"error": "vs_geometry failed", "detail": e})),
+        Command::Saliency {
+            image,
+            top_n,
+            min_score,
+        } => saliency::run(&image, &saliency::SaliencyParams { top_n, min_score })
+            .unwrap_or_else(|e| json!({"error": "vs_saliency failed", "detail": e})),
+        Command::Depth {
+            image,
+            bins,
+            region,
+        } => depth::run(&image, &depth::DepthParams { bins, region })
+            .unwrap_or_else(|e| json!({"error": "vs_depth failed", "detail": e})),
+        Command::Segment {
+            image,
+            min_area_ratio,
+            max_instances,
+        } => segment::run(
+            &image,
+            &segment::SegmentParams {
+                points: vec![],
+                labels: vec![],
+                min_area: min_area_ratio,
+                max_instances,
+            },
+        )
+        .unwrap_or_else(|e| json!({"error": "vs_segment failed", "detail": e})),
+        Command::Ocr {
+            image,
+            max_items,
+            min_conf,
+        } => ocr::run(
+            &image,
+            &ocr::OcrParams {
+                max_items,
+                min_conf,
+            },
+        )
+        .unwrap_or_else(|e| json!({"error": "vs_ocr failed", "detail": e})),
     };
     println!("{}", serde_json::to_string_pretty(&out).unwrap());
 }

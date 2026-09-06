@@ -50,40 +50,69 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 调度器（6.5GB 预算 + 1 GPU 槽位）
     let sched = scheduler::default_scheduler();
-    // 注册推理函数：S3 阶段为桩（S4 接入 ort 模型）
+    // 注册推理函数：真实调用 vs-core 传感器（S4/S5 模型）
     sched.register(
         "saliency",
-        Box::new(|model, args, use_gpu| {
-            Ok(serde_json::json!({
-                "model": model,
-                "args": args,
-                "device": if use_gpu { "cuda" } else { "cpu" },
-                "stub": true,
-            }))
+        Box::new(|_model, args, _use_gpu| {
+            let image = args
+                .get("image")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "缺少 args.image".to_string())?;
+            let top_n = args.get("top_n").and_then(|v| v.as_u64()).unwrap_or(5) as u32;
+            let min_score = args
+                .get("min_score")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.3);
+            vs_core::saliency::run(
+                std::path::Path::new(image),
+                &vs_core::saliency::SaliencyParams { top_n, min_score },
+            )
         }),
         None,
     );
     sched.register(
         "segment",
-        Box::new(|model, args, use_gpu| {
-            Ok(serde_json::json!({
-                "model": model,
-                "args": args,
-                "device": if use_gpu { "cuda" } else { "cpu" },
-                "stub": true,
-            }))
+        Box::new(|_model, args, _use_gpu| {
+            let image = args
+                .get("image")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "缺少 args.image".to_string())?;
+            let min_area = args
+                .get("min_area_ratio")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.01);
+            let max_instances = args
+                .get("max_instances")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(10) as u32;
+            vs_core::segment::run(
+                std::path::Path::new(image),
+                &vs_core::segment::SegmentParams {
+                    points: vec![],
+                    labels: vec![],
+                    min_area,
+                    max_instances,
+                },
+            )
         }),
         None,
     );
     sched.register(
         "depth",
-        Box::new(|model, args, use_gpu| {
-            Ok(serde_json::json!({
-                "model": model,
-                "args": args,
-                "device": if use_gpu { "cuda" } else { "cpu" },
-                "stub": true,
-            }))
+        Box::new(|_model, args, _use_gpu| {
+            let image = args
+                .get("image")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "缺少 args.image".to_string())?;
+            let bins = args.get("bins").and_then(|v| v.as_u64()).unwrap_or(3) as u32;
+            let region = args
+                .get("region")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            vs_core::depth::run(
+                std::path::Path::new(image),
+                &vs_core::depth::DepthParams { bins, region },
+            )
         }),
         None,
     );

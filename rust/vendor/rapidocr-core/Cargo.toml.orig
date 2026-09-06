@@ -1,0 +1,42 @@
+[package]
+name = "rapidocr-core"
+version = "0.2.2"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Rust ONNX OCR core for RapidOCR-style detection, optional classification, and recognition pipelines"
+readme = "README.md"
+keywords = ["ocr", "onnx", "rapidocr", "paddleocr"]
+categories = ["computer-vision", "multimedia::images"]
+
+[lib]
+name = "rapidocr_core"
+path = "src/lib.rs"
+
+[[example]]
+name = "tokio_usage"
+required-features = ["tokio"]
+
+[features]
+default = ["model-download"]
+directml = ["ort/directml"]
+model-download = ["dep:reqwest"]
+tokio = ["dep:tokio"]
+
+[dependencies]
+anyhow = "1"
+image = "0.25"
+imageproc = "0.25"
+ndarray = "0.17"
+ort = { version = "2.0.0-rc.12", default-features = true }
+reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false, optional = true }
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "sync", "time"], optional = true }
+toml = "0.8"
+
+[dev-dependencies]
+ndarray-npy = "0.10"
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }

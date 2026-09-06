@@ -62,7 +62,13 @@ fn assert_structure(a: &Value, b: &Value, path: &str) {
         (Value::Bool(x), Value::Bool(y)) => assert_eq!(x, y, "{path}"),
         (Value::Null, Value::Null) => {}
         (Value::Array(x), Value::Array(y)) => {
-            assert_eq!(x.len(), y.len(), "{path}: array len {} vs {}", x.len(), y.len());
+            assert_eq!(
+                x.len(),
+                y.len(),
+                "{path}: array len {} vs {}",
+                x.len(),
+                y.len()
+            );
             for (i, (xe, ye)) in x.iter().zip(y).enumerate() {
                 assert_structure(xe, ye, &format!("{path}[{i}]"));
             }
@@ -196,27 +202,8 @@ fn ocr_matches_python() {
         assert_structure(golden, &r, &format!("{key}.ocr"));
         let ge = golden["elements"].as_array().unwrap();
         let re = r["elements"].as_array().unwrap();
-        if key == "s02_overlap" {
-            // 已知差距：crate scanline 分数低 ~0.1 → box_thresh=0.5 漏检 "A"
-            // （golden 1 元素，Rust 0）。显式断言，不静默跳过。
-            assert_eq!(
-                ge.len(),
-                1,
-                "{key}: golden 应有 1 元素（已知差距基线）"
-            );
-            assert_eq!(
-                re.len(),
-                0,
-                "{key}: Rust 当前漏检（rapidocr-core scanline vs cv2.fillPoly 分数差）"
-            );
-            eprintln!(
-                "[KNOWN GAP] {key}: golden {} 元素 vs Rust {}（det 分数差距，待 crate 修复）",
-                ge.len(),
-                re.len()
-            );
-        } else {
-            // 元素配对：CER=0 + bbox IoU ≥ 0.7（当前 crate parity；plan 目标 0.95）
-            assert_elements_paired(ge, re, &format!("{key}.ocr.elements"), 0.7);
-        }
+        // 元素配对：CER=0 + bbox IoU ≥ 阈值
+        // （BGR 输入 + fillPoly 等价 + unclip 1.4 修复后：s02 IoU 1.0，s03 部分 1.0，s04 0.86-0.89）
+        assert_elements_paired(ge, re, &format!("{key}.ocr.elements"), 0.85);
     }
 }

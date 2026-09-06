@@ -17,6 +17,10 @@ pub struct OcrParams {
 }
 
 /// 模型目录（与 Python rapidocr 同模型：PP-OCRv6 small）。
+pub fn model_dir_debug() -> String {
+    model_dir()
+}
+
 fn model_dir() -> String {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     format!("{home}/.cache/vsensor/rapidocr")
@@ -24,10 +28,43 @@ fn model_dir() -> String {
 
 /// 常用中文/英文词典（与 Python `COMMON_WORDS` 一致；固定顺序保证确定性）。
 const COMMON_WORDS: &[&str] = &[
-    "提交", "取消", "确定", "保存", "删除", "编辑", "搜索", "设置", "登录", "注册",
-    "退出", "返回", "下一步", "上一步", "完成", "确认", "关闭", "打开", "新建",
-    "submit", "cancel", "ok", "save", "delete", "edit", "search", "settings",
-    "login", "logout", "back", "next", "done", "close", "open", "new", "yes", "no",
+    "提交",
+    "取消",
+    "确定",
+    "保存",
+    "删除",
+    "编辑",
+    "搜索",
+    "设置",
+    "登录",
+    "注册",
+    "退出",
+    "返回",
+    "下一步",
+    "上一步",
+    "完成",
+    "确认",
+    "关闭",
+    "打开",
+    "新建",
+    "submit",
+    "cancel",
+    "ok",
+    "save",
+    "delete",
+    "edit",
+    "search",
+    "settings",
+    "login",
+    "logout",
+    "back",
+    "next",
+    "done",
+    "close",
+    "open",
+    "new",
+    "yes",
+    "no",
 ];
 
 /// Levenshtein 编辑距离（标准 DP，与 Python 一致；按字符计数，中文安全）。
@@ -83,11 +120,18 @@ pub fn run(path: &Path, p: &OcrParams) -> Result<Value, String> {
     // rapidocr-core 推理（det→cls→rec）
     let dir = model_dir();
     if !Path::new(&dir).exists() {
-        return Err(format!("模型目录不存在: {dir}（需放置 PP-OCRv6 small 模型 + dict）"));
+        return Err(format!(
+            "模型目录不存在: {dir}（需放置 PP-OCRv6 small 模型 + dict）"
+        ));
     }
-    let cfg = rapidocr_core::config::RapidOcrConfig::ppocr_v6_small(&dir);
-    let mut engine = rapidocr_core::RapidOcr::new(cfg)
-        .map_err(|e| format!("rapidocr init: {e}"))?;
+    let mut cfg = rapidocr_core::config::RapidOcrConfig::ppocr_v6_small(&dir);
+    // unclip_ratio 1.6→1.4：Rust 凸偏移（miter）比 pyclipper round-join 膨胀更多，
+    // 调低后 box 与 Python 一致（实测 s03 btn2/btn3 完全匹配）。
+    if let Some(det) = cfg.det.as_mut() {
+        det.unclip_ratio = 1.4;
+    }
+    let mut engine =
+        rapidocr_core::RapidOcr::new(cfg).map_err(|e| format!("rapidocr init: {e}"))?;
     let rgb = image::RgbImage::from_raw(w, h, img.data.clone()).ok_or("image decode")?;
     let out = engine
         .run_image(&rgb)
@@ -105,16 +149,15 @@ pub fn run(path: &Path, p: &OcrParams) -> Result<Value, String> {
             .bbox
             .points
             .iter()
-            .map(|pt| json!([py_round(f64::from(pt[0])) as i64, py_round(f64::from(pt[1])) as i64]))
+            .map(|pt| {
+                json!([
+                    py_round(f64::from(pt[0])) as i64,
+                    py_round(f64::from(pt[1])) as i64
+                ])
+            })
             .collect();
-        let xs: Vec<i64> = quad
-            .iter()
-            .map(|p| p[0].as_i64().unwrap_or(0))
-            .collect();
-        let ys: Vec<i64> = quad
-            .iter()
-            .map(|p| p[1].as_i64().unwrap_or(0))
-            .collect();
+        let xs: Vec<i64> = quad.iter().map(|p| p[0].as_i64().unwrap_or(0)).collect();
+        let ys: Vec<i64> = quad.iter().map(|p| p[1].as_i64().unwrap_or(0)).collect();
         let cx = py_round(xs.iter().sum::<i64>() as f64 / 4.0) as i64;
         let cy = py_round(ys.iter().sum::<i64>() as f64 / 4.0) as i64;
         let bbox = [
