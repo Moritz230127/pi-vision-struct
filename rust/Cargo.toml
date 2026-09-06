@@ -17,6 +17,7 @@ ndarray = "0.16"
 rayon = "1"
 vtracer = "1.0.0-alpha.4"
 regex = "1"
+tokenizers = "0.23"
 rapidocr-core = { path = "vendor/rapidocr-core" }
 landlock = "0.4"
 rustix = "1"

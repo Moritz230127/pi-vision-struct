@@ -19,6 +19,7 @@ pub mod fusion;
 pub mod geometry;
 pub mod image;
 pub mod ocr;
+pub mod omniparser;
 pub mod pix;
 pub mod rules;
 pub mod saliency;

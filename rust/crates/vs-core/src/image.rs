@@ -14,6 +14,13 @@ pub struct RgbImage {
 }
 
 impl RgbImage {
+    /// 视图（image crate 的 RgbImage，供 resize 等操作）。
+    pub fn data_view(&self) -> image::RgbImage {
+        image::RgbImage::from_raw(self.width, self.height, self.data.clone()).unwrap()
+    }
+}
+
+impl RgbImage {
     /// 像素 (x, y) 的 RGB 通道。
     pub fn pixel(&self, x: u32, y: u32) -> [u8; 3] {
         let i = ((y * self.width + x) * 3) as usize;

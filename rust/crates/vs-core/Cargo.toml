@@ -12,6 +12,7 @@ image.workspace = true
 ndarray.workspace = true
 rayon.workspace = true
 vtracer.workspace = true
+tokenizers.workspace = true
 rapidocr-core = { path = "../../vendor/rapidocr-core" }
 regex.workspace = true
 ort.workspace = true
