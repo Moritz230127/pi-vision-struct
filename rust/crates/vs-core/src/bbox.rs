@@ -6,16 +6,16 @@
 //! - `image_px`：图像文件像素（经缩放后的图片）
 //! - `pt`：印刷点（PPTX：1pt = 1/72 英寸）
 
-use crate::util::py_round;
+use crate::util::py_round_i64;
 
 /// CSS 像素（含滚动偏移）→ 设备像素：`device = (css - scroll) × dpr`。
 pub fn css_to_device(bbox: &[f64], dpr: f64, scroll: (i64, i64)) -> [i64; 4] {
     let (sx, sy) = scroll;
     [
-        py_round((bbox[0] - sx as f64) * dpr) as i64,
-        py_round((bbox[1] - sy as f64) * dpr) as i64,
-        py_round((bbox[2] - sx as f64) * dpr) as i64,
-        py_round((bbox[3] - sy as f64) * dpr) as i64,
+        py_round_i64((bbox[0] - sx as f64) * dpr),
+        py_round_i64((bbox[1] - sy as f64) * dpr),
+        py_round_i64((bbox[2] - sx as f64) * dpr),
+        py_round_i64((bbox[3] - sy as f64) * dpr),
     ]
 }
 
@@ -23,30 +23,31 @@ pub fn css_to_device(bbox: &[f64], dpr: f64, scroll: (i64, i64)) -> [i64; 4] {
 pub fn device_to_css(bbox: &[f64], dpr: f64, scroll: (i64, i64)) -> [i64; 4] {
     let (sx, sy) = scroll;
     [
-        py_round(bbox[0] / dpr + sx as f64) as i64,
-        py_round(bbox[1] / dpr + sy as f64) as i64,
-        py_round(bbox[2] / dpr + sx as f64) as i64,
-        py_round(bbox[3] / dpr + sy as f64) as i64,
+        py_round_i64(bbox[0] / dpr + sx as f64),
+        py_round_i64(bbox[1] / dpr + sy as f64),
+        py_round_i64(bbox[2] / dpr + sx as f64),
+        py_round_i64(bbox[3] / dpr + sy as f64),
     ]
 }
 
 /// 按缩放系数 `k` 变换 bbox（图像缩放 / 区域放大回原图）。
 pub fn scale_bbox(bbox: &[f64], k: f64) -> [i64; 4] {
     [
-        py_round(bbox[0] * k) as i64,
-        py_round(bbox[1] * k) as i64,
-        py_round(bbox[2] * k) as i64,
-        py_round(bbox[3] * k) as i64,
+        py_round_i64(bbox[0] * k),
+        py_round_i64(bbox[1] * k),
+        py_round_i64(bbox[2] * k),
+        py_round_i64(bbox[3] * k),
     ]
 }
 
 /// 裁剪 bbox 到画布内：先取整，再钳制到 `[0, w] × [0, h]`。
 pub fn clip_bbox(bbox: &[f64], w: i64, h: i64) -> [i64; 4] {
-    let x1 = py_round(bbox[0]).max(0.0) as i64;
-    let y1 = py_round(bbox[1]).max(0.0) as i64;
-    let x2 = py_round(bbox[2]).min(w as f64) as i64;
-    let y2 = py_round(bbox[3]).min(h as f64) as i64;
-    [x1, y1, x2, y2]
+    [
+        py_round_i64(bbox[0]).max(0),
+        py_round_i64(bbox[1]).max(0),
+        py_round_i64(bbox[2]).min(w),
+        py_round_i64(bbox[3]).min(h),
+    ]
 }
 
 /// bbox 面积（负宽/高按 0 计）。
@@ -62,10 +63,10 @@ pub fn bbox_intersection(a: &[f64], b: &[f64]) -> Option<[i64; 4]> {
     let y2 = a[3].min(b[3]);
     if x2 > x1 && y2 > y1 {
         Some([
-            py_round(x1) as i64,
-            py_round(y1) as i64,
-            py_round(x2) as i64,
-            py_round(y2) as i64,
+            py_round_i64(x1),
+            py_round_i64(y1),
+            py_round_i64(x2),
+            py_round_i64(y2),
         ])
     } else {
         None

@@ -19,6 +19,13 @@ pub fn py_round(v: f64) -> f64 {
     }
 }
 
+/// [`py_round`] 的整数版：返回值必为整数值，`as i64` 截断无损。
+///
+/// 坐标/颜色取整的统一出口，避免调用侧重复 `py_round(v) as i64`。
+pub fn py_round_i64(v: f64) -> i64 {
+    py_round(v) as i64
+}
+
 #[cfg(test)]
 mod tests {
     use super::py_round;

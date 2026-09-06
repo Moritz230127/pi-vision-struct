@@ -237,7 +237,7 @@ fn bbox_matches_python() {
 #[test]
 fn color_matches_python() {
     let g = load_golden();
-    let t = |v: (f64, f64, f64)| json!([v.0, v.1, v.2]);
+    let t = |v: [f64; 3]| json!(v);
 
     assert_json_eq(
         &g["srgb_to_linear_0"],
@@ -257,51 +257,45 @@ fn color_matches_python() {
 
     assert_json_eq(
         &g["relative_luminance_white"],
-        &json!(color::relative_luminance((255.0, 255.0, 255.0))),
+        &json!(color::relative_luminance([255.0, 255.0, 255.0])),
         "lum_white",
     );
     assert_json_eq(
         &g["relative_luminance_black"],
-        &json!(color::relative_luminance((0.0, 0.0, 0.0))),
+        &json!(color::relative_luminance([0.0, 0.0, 0.0])),
         "lum_black",
     );
 
     assert_json_eq(
         &g["contrast_ratio_bw"],
-        &json!(color::contrast_ratio(
-            (0.0, 0.0, 0.0),
-            (255.0, 255.0, 255.0)
-        )),
+        &json!(color::contrast_ratio([0.0, 0.0, 0.0], [255.0, 255.0, 255.0])),
         "cr_bw",
     );
     assert_json_eq(
         &g["contrast_ratio_same"],
-        &json!(color::contrast_ratio(
-            (100.0, 100.0, 100.0),
-            (100.0, 100.0, 100.0)
-        )),
+        &json!(color::contrast_ratio([100.0, 100.0, 100.0], [100.0, 100.0, 100.0])),
         "cr_same",
     );
 
     assert_json_eq(
         &g["rgb_to_lab_white"],
-        &t(color::rgb_to_lab((255.0, 255.0, 255.0))),
+        &t(color::rgb_to_lab([255.0, 255.0, 255.0])),
         "lab_white",
     );
     assert_json_eq(
         &g["rgb_to_lab_red"],
-        &t(color::rgb_to_lab((255.0, 0.0, 0.0))),
+        &t(color::rgb_to_lab([255.0, 0.0, 0.0])),
         "lab_red",
     );
 
     assert_json_eq(
         &g["delta_e76_same"],
-        &json!(color::delta_e76((10.0, 20.0, 30.0), (10.0, 20.0, 30.0))),
+        &json!(color::delta_e76([10.0, 20.0, 30.0], [10.0, 20.0, 30.0])),
         "de_same",
     );
     assert_json_eq(
         &g["delta_e76_bw"],
-        &json!(color::delta_e76((0.0, 0.0, 0.0), (255.0, 255.0, 255.0))),
+        &json!(color::delta_e76([0.0, 0.0, 0.0], [255.0, 255.0, 255.0])),
         "de_bw",
     );
 
@@ -312,12 +306,12 @@ fn color_matches_python() {
     );
     assert_json_eq(
         &g["rgb_to_hex"],
-        &json!(color::rgb_to_hex((255.0, 128.0, 64.0))),
+        &json!(color::rgb_to_hex([255.0, 128.0, 64.0])),
         "rgb_to_hex",
     );
     assert_json_eq(
         &g["rgb_to_hex_round"],
-        &json!(color::rgb_to_hex((254.5, 127.5, 63.5))),
+        &json!(color::rgb_to_hex([254.5, 127.5, 63.5])),
         "rgb_to_hex_round",
     );
     assert_json_eq(

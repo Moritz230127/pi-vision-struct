@@ -17,7 +17,7 @@ pub const NOTATION_GUIDE: &str = "primitive notation: in reasoning chains, refer
 /// 统一元素（对应 Python `element()` 输出，逐字段一致）。
 ///
 /// `bbox` 原样序列化（不取整）；`source` 为空时输出 `[]`。
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Debug)]
 pub struct Element<'a> {
     pub id: i64,
     #[serde(rename = "type")]
