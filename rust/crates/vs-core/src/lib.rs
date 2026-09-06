@@ -9,7 +9,10 @@
 //! - [`color`]：CIE Lab ΔE76 / WCAG 对比度 / hex 互转
 //! - [`util`]：Python 兼容的取整等基础工具
 
+pub mod ascii;
 pub mod bbox;
 pub mod color;
+pub mod image;
+pub mod scene_stats;
 pub mod schema;
 pub mod util;

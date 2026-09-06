@@ -268,12 +268,18 @@ fn color_matches_python() {
 
     assert_json_eq(
         &g["contrast_ratio_bw"],
-        &json!(color::contrast_ratio([0.0, 0.0, 0.0], [255.0, 255.0, 255.0])),
+        &json!(color::contrast_ratio(
+            [0.0, 0.0, 0.0],
+            [255.0, 255.0, 255.0]
+        )),
         "cr_bw",
     );
     assert_json_eq(
         &g["contrast_ratio_same"],
-        &json!(color::contrast_ratio([100.0, 100.0, 100.0], [100.0, 100.0, 100.0])),
+        &json!(color::contrast_ratio(
+            [100.0, 100.0, 100.0],
+            [100.0, 100.0, 100.0]
+        )),
         "cr_same",
     );
 
