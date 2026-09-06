@@ -11,3 +11,6 @@ weights/
 
 # TypeScript 构建产物（npm 发布由 package.json files 处理，git 不入库）
 dist/
+
+# Rust 构建产物（cargo 生成，git 不入库）
+rust/target/
