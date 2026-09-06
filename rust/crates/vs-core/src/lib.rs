@@ -14,6 +14,7 @@ pub mod audit;
 pub mod bbox;
 pub mod color;
 pub mod depth;
+pub mod detect;
 pub mod edge;
 pub mod fusion;
 pub mod geometry;

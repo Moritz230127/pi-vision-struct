@@ -42,6 +42,7 @@ def run(pybin: str, script: str, *args: str) -> dict:
 
 def main() -> None:
     om = resolve_python("omniparser")
+    vs = resolve_python("vsensor")
     golden = {}
     for img in IMAGES:
         path = os.path.join(SAMPLES, img)
@@ -53,6 +54,19 @@ def main() -> None:
                 "--image", path, "--no-ocr", "--daemon", "never",
             )
         }
+    # detect（OWLv2）：text_lines 有检测；s01/s02 无检测（验证空输出一致）
+    detect_imgs = ["text_lines.png", "s01_low_contrast.png", "s02_overlap.png"]
+    for img in detect_imgs:
+        if img.startswith("text_lines"):
+            path = os.path.join(ROOT, "tests", "bench_fixtures", img)
+        else:
+            path = os.path.join(SAMPLES, img)
+        key = img.replace(".png", "")
+        golden[key] = golden.get(key, {})
+        golden[key]["detect"] = run(
+            vs, "vs_detect.py",
+            "--image", path, "--classes", "person,car,text",
+        )
     print(json.dumps(golden, ensure_ascii=False))
 
 

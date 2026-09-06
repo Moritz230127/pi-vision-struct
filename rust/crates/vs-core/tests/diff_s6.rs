@@ -65,7 +65,13 @@ fn assert_json_eq(a: &Value, b: &Value, path: &str) {
         }
         (Value::Object(x), Value::Object(y)) => {
             // Rust envelope 附加键（Python 无）或 Python 独有键：跳过
-            let skip_keys = ["findings", "candidates", "foreground", "notation", "anomalies"];
+            let skip_keys = [
+                "findings",
+                "candidates",
+                "foreground",
+                "notation",
+                "anomalies",
+            ];
             let x_keys: Vec<&String> = x
                 .keys()
                 .filter(|k| !skip_keys.contains(&k.as_str()))
@@ -105,18 +111,11 @@ fn assert_json_eq(a: &Value, b: &Value, path: &str) {
 
 /// 元素匹配：Python 每元素在 Rust 中找最大 IoU 匹配（≥ 0.9）。
 /// caption 断言非空 + 长度相似。返回 (匹配数, Python 元素数)。
-fn assert_elements_matched(
-    py_els: &[Value],
-    rust_els: &[Value],
-    path: &str,
-) -> (usize, usize) {
+fn assert_elements_matched(py_els: &[Value], rust_els: &[Value], path: &str) -> (usize, usize) {
     let mut matched = 0usize;
     for (i, pe) in py_els.iter().enumerate() {
         let p = format!("{path}[{i}]");
-        let (Some(pb), _) = (
-            pe.get("bbox").and_then(|v| v.as_array()),
-            pe.get("bbox"),
-        ) else {
+        let (Some(pb), _) = (pe.get("bbox").and_then(|v| v.as_array()), pe.get("bbox")) else {
             panic!("{p}: missing bbox");
         };
         let pb: Vec<f64> = pb.iter().filter_map(|v| v.as_f64()).collect();
@@ -202,7 +201,8 @@ fn omniparser_matches_python() {
         // 元素匹配：Python 每元素在 Rust 中 IoU ≥ 0.9
         let ge = golden["elements"].as_array().unwrap();
         let re = r["elements"].as_array().unwrap();
-        let (matched, total) = assert_elements_matched(ge, re, &format!("{key}.omniparser.elements"));
+        let (matched, total) =
+            assert_elements_matched(ge, re, &format!("{key}.omniparser.elements"));
         assert_eq!(matched, total, "{key}: 全部 Python 元素应匹配");
         // 结构字段（schema/task/sensors/coordsys/source 除 path/metrics/truncated）
         assert_json_eq(golden, &r, &format!("{key}.omniparser"));
