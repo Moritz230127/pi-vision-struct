@@ -569,12 +569,14 @@ const FUSE: Record<string, Act> = {
 // ---- 自诊断动作（check / setup）：双宿主均可用，沙箱豁免 ----
 const SELFDIAG: Record<string, Act> = {
 	check: {
+		script: "setup/vs_setup.py",
 		bin: DEFAULT_PYTHON,
 		sandbox: false,
 		timeout: 30_000,
 		build: () => ["-u", `${PKG_ROOT}python/setup/vs_setup.py`, "--check"],
 	},
 	setup: {
+		script: "setup/vs_setup.py",
 		bin: DEFAULT_PYTHON,
 		sandbox: false, // 需网络安装依赖
 		timeout: 1_200_000,

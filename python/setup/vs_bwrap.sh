@@ -30,6 +30,6 @@ exec "$BWRAP" --unshare-net \
   --bind /var/tmp /var/tmp \
   --bind "$HOME" "$HOME" \
   --tmpfs /run \
-  --bind "$OMNI_CACHE" "$OMNI_CACHE" \
+  --bind-try "$OMNI_CACHE" "$OMNI_CACHE" \
   --bind "$RUNTIME" "$RUNTIME" \
   "$@"
