@@ -34,13 +34,20 @@ pub fn load_rgb(path: &Path) -> Result<RgbImage, String> {
 }
 
 /// 灰度（0-255）——对应 PIL `convert("L")` 的 ITU-R 601-2 luma：
-/// `L = (299R + 587G + 114B) / 1000`（整数除法，与 PIL 一致）。
+/// `L = (19595R + 38470G + 7471B + 0x8000) >> 16`（带舍入的 65536 除法，与 PIL 一致）。
 pub fn to_gray_u8(img: &RgbImage) -> Vec<u8> {
     img.data
         .as_chunks::<3>()
         .0
         .iter()
-        .map(|p| ((p[0] as u32 * 299 + p[1] as u32 * 587 + p[2] as u32 * 114) / 1000) as u8)
+        .map(|p| {
+            let v = (u32::from(p[0]) * 19595
+                + u32::from(p[1]) * 38470
+                + u32::from(p[2]) * 7471
+                + 0x8000)
+                >> 16;
+            v as u8
+        })
         .collect()
 }
 
@@ -50,24 +57,24 @@ mod tests {
 
     #[test]
     fn gray_matches_pil_luma() {
-        // PIL: convert("L") 对纯色像素的已知值
+        // PIL: convert("L") 对纯色像素的已知值（L24 宏：19595/38470/7471 + 0x8000 >> 16）
         let img = RgbImage {
             width: 1,
             height: 1,
             data: vec![255, 0, 0], // 纯红
         };
-        assert_eq!(to_gray_u8(&img), vec![76]); // (299*255)/1000 = 76.245 → 76
+        assert_eq!(to_gray_u8(&img), vec![76]); // (255*19595+32768)>>16 = 76.75 → 76
         let img = RgbImage {
             width: 1,
             height: 1,
             data: vec![0, 255, 0], // 纯绿
         };
-        assert_eq!(to_gray_u8(&img), vec![149]); // (587*255)/1000 = 149.685 → 149
+        assert_eq!(to_gray_u8(&img), vec![150]); // (255*38470+32768)>>16 = 150.17 → 150
         let img = RgbImage {
             width: 1,
             height: 1,
             data: vec![0, 0, 255], // 纯蓝
         };
-        assert_eq!(to_gray_u8(&img), vec![29]); // (114*255)/1000 = 29.07 → 29
+        assert_eq!(to_gray_u8(&img), vec![29]); // (255*7471+32768)>>16 = 29.57 → 29
     }
 }

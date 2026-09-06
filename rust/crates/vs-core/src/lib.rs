@@ -12,7 +12,9 @@
 pub mod ascii;
 pub mod bbox;
 pub mod color;
+pub mod edge;
 pub mod image;
+pub mod pix;
 pub mod scene_stats;
 pub mod schema;
 pub mod util;

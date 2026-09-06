@@ -18,14 +18,16 @@ pub struct SceneStatsParams {
 
 // ---------------------------------------------------------------- MEDIANCUT 量化
 
-/// 量化盒：一组 (RGB, count) 颜色。
+/// 量化盒：一组 (RGB, count) 颜色 + 总像素数。
 struct Box {
     colors: Vec<([u8; 3], u32)>,
+    pixel_count: u32,
 }
 
 impl Box {
-    /// 最大通道跨度（PIL 选盒标准：range 最大的盒优先分裂）。
-    fn range(&self) -> u32 {
+    /// RGB 包围盒体积（PIL `compute_box_volume`）：(r+1)(g+1)(b+1)。
+    /// 体积 == 1 表示单色盒（不可分裂）。
+    fn volume(&self) -> u32 {
         let (mut mn, mut mx) = ([255u8; 3], [0u8; 3]);
         for (c, _) in &self.colors {
             for i in 0..3 {
@@ -33,10 +35,15 @@ impl Box {
                 mx[i] = mx[i].max(c[i]);
             }
         }
-        (mx[0] - mn[0]).max(mx[1] - mn[1]).max(mx[2] - mn[2]) as u32
+        (u32::from(mx[0] - mn[0]) + 1)
+            * (u32::from(mx[1] - mn[1]) + 1)
+            * (u32::from(mx[2] - mn[2]) + 1)
     }
 
-    /// 在跨度最大通道的加权中位数处分裂；单色盒返回 `None`。
+    /// 分裂（PIL `split` + `splitlists` 精确复刻）：
+    /// 轴 = 加权跨度最大（77/150/29 = luma 权重，首个最大）；
+    /// 分裂点 = 沿轴累加 count 至 `left*2 > pixelCount`（严格），同色扩展归左；
+    /// 右为空时从尾部拉同色到右（主色在末端的情形）。
     fn split(&self) -> Option<(Box, Box)> {
         let (mut mn, mut mx) = ([255u8; 3], [0u8; 3]);
         for (c, _) in &self.colors {
@@ -45,36 +52,61 @@ impl Box {
                 mx[i] = mx[i].max(c[i]);
             }
         }
-        let ch = (0..3).max_by_key(|&i| (mx[i] - mn[i]) as u32)?;
-        if mx[ch] == mn[ch] {
-            return None; // 单色盒无法分裂
-        }
+        let f = [
+            u32::from(mx[0] - mn[0]) * 77,
+            u32::from(mx[1] - mn[1]) * 150,
+            u32::from(mx[2] - mn[2]) * 29,
+        ];
+        // 首个最大（PIL `best < f[i]` 保持首个）
+        let axis = (0..3).fold(0, |best, i| if f[i] > f[best] { i } else { best });
         let mut sorted = self.colors.clone();
-        sorted.sort_by_key(|(c, _)| c[ch]);
-        let total: u32 = sorted.iter().map(|(_, n)| n).sum();
-        let mut acc = 0u32;
-        let mut split_at = sorted.len() / 2;
+        sorted.sort_by_key(|(c, _)| std::cmp::Reverse(c[axis])); // PIL 列表为降序
+                                                                 // 分裂点：left*2 > pixelCount（严格大于）
+        let mut left = 0u32;
+        let mut split_idx = sorted.len();
         for (i, (_, n)) in sorted.iter().enumerate() {
-            acc += n;
-            if acc * 2 >= total {
-                split_at = i + 1;
+            left += n;
+            if left * 2 > self.pixel_count {
+                split_idx = i + 1;
                 break;
             }
         }
-        if split_at == 0 || split_at >= sorted.len() {
+        // 同色扩展：splitColourVal 同值像素全部归左
+        if split_idx > 0 && split_idx < sorted.len() {
+            let split_val = sorted[split_idx - 1].0[axis];
+            while split_idx < sorted.len() && sorted[split_idx].0[axis] == split_val {
+                split_idx += 1;
+            }
+        }
+        // 尾部回退：右为空时，从尾部拉与尾色相同的像素到右
+        if split_idx >= sorted.len() {
+            let tail_val = sorted[sorted.len() - 1].0[axis];
+            let mut idx = sorted.len();
+            while idx > 0 && sorted[idx - 1].0[axis] == tail_val {
+                idx -= 1;
+            }
+            split_idx = idx;
+        }
+        if split_idx == 0 || split_idx >= sorted.len() {
             return None;
         }
+        let (l, r) = sorted.split_at(split_idx);
+        let lc: u32 = l.iter().map(|(_, n)| n).sum();
         Some((
             Box {
-                colors: sorted[..split_at].to_vec(),
+                colors: l.to_vec(),
+                pixel_count: lc,
             },
             Box {
-                colors: sorted[split_at..].to_vec(),
+                colors: r.to_vec(),
+                pixel_count: self.pixel_count - lc,
             },
         ))
     }
 
     /// 盒的均值色（按 count 加权）+ 总像素数（对应 PIL getcolors 的 count）。
+    ///
+    /// 颜色取整为 **round-half-up**（PIL `(int)(.5 + avg/count)`），非整数除法截断。
     fn mean(&self) -> (u32, [u8; 3]) {
         let (mut r, mut g, mut b, mut n) = (0u64, 0u64, 0u64, 0u64);
         for (c, cnt) in &self.colors {
@@ -86,39 +118,213 @@ impl Box {
         if n == 0 {
             return (0, [0, 0, 0]);
         }
-        ((n as u32), [(r / n) as u8, (g / n) as u8, (b / n) as u8])
+        let rhu = |v: u64| (v as f64 / n as f64 + 0.5) as u8; // round half up
+        ((n as u32), [rhu(r), rhu(g), rhu(b)])
     }
 }
 
-/// MEDIANCUT 量化（对应 PIL `Image.quantize(method=MEDIANCUT)`）：
-/// 颜色直方图 → 按最大通道跨度反复分裂 → 每盒均值色，按 count 降序。
-fn median_cut(img: &RgbImage, n_colors: u32) -> Vec<(u32, [u8; 3])> {
+/// PIL `ImagingQuantHeap` 精确复刻：按 pixelCount 的 max-heap（父 ≥ 子）。
+/// 存储盒索引（1-based，index 0 占位），比较时读 boxes 的 pixel_count。
+struct BoxHeap {
+    items: Vec<usize>,
+}
+
+impl BoxHeap {
+    fn new() -> Self {
+        Self { items: vec![0] }
+    }
+
+    /// PIL `ImagingQuantHeapAdd`：尾部插入，父 < 子时上浮（严格，平局不上浮）。
+    fn add(&mut self, idx: usize, boxes: &[Option<Box>]) {
+        let count = boxes[idx].as_ref().unwrap().pixel_count;
+        self.items.push(idx);
+        let mut k = self.items.len() - 1;
+        while k > 1 && boxes[self.items[k / 2]].as_ref().unwrap().pixel_count < count {
+            self.items[k] = self.items[k / 2];
+            k /= 2;
+        }
+        self.items[k] = idx;
+    }
+
+    /// PIL `ImagingQuantHeapRemove`：取根（最大），末元素下沉（选较大子节点，平局取左）。
+    fn remove(&mut self, boxes: &[Option<Box>]) -> Option<usize> {
+        if self.items.len() <= 1 {
+            return None;
+        }
+        let root = self.items[1];
+        let last = self.items.pop().unwrap();
+        if self.items.len() > 1 {
+            let v = last;
+            let vc = boxes[v].as_ref().unwrap().pixel_count;
+            self.items[1] = v;
+            let mut k = 1;
+            loop {
+                let mut l = k * 2;
+                if l >= self.items.len() {
+                    break;
+                }
+                if l + 1 < self.items.len()
+                    && boxes[self.items[l]].as_ref().unwrap().pixel_count
+                        < boxes[self.items[l + 1]].as_ref().unwrap().pixel_count
+                {
+                    l += 1;
+                }
+                if vc > boxes[self.items[l]].as_ref().unwrap().pixel_count {
+                    break;
+                }
+                self.items[k] = self.items[l];
+                k = l;
+            }
+            self.items[k] = v;
+        }
+        Some(root)
+    }
+}
+
+/// MEDIANCUT 量化（PIL `Image.quantize(method=MEDIANCUT)` 精确复刻）：
+/// 颜色直方图 → 堆按 pixelCount 最大优先反复分裂（跳过单色盒）→
+/// 返回盒数组（内部节点为 `None`）+ 树遍历序（调色板索引 = 左优先前序遍历）。
+///
+/// 树结构：分裂时父盒标记为内部节点（`None`），左右子各占新索引。
+fn median_cut_boxes(img: &RgbImage, n_colors: u32) -> (Vec<Option<Box>>, Vec<usize>) {
     let mut hist: HashMap<[u8; 3], u32> = HashMap::new();
     for px in img.data.as_chunks::<3>().0 {
         *hist.entry([px[0], px[1], px[2]]).or_insert(0) += 1;
     }
-    let mut boxes = vec![Box {
+    let mut boxes: Vec<Option<Box>> = vec![Some(Box {
         colors: hist.into_iter().collect(),
-    }];
-    while boxes.len() < n_colors as usize {
-        let Some(idx) = boxes
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, b)| b.range())
-            .map(|(i, _)| i)
-        else {
-            break;
+        pixel_count: img.width * img.height,
+    })];
+    let mut children: Vec<(usize, usize)> = vec![(0, 0)]; // 内部节点的左右子
+    let mut heap = BoxHeap::new();
+    heap.add(0, &boxes);
+    // 分裂 n_colors-1 次（PIL `while (--nPixels)`）；单色盒移除但不计分裂
+    'outer: for _ in 1..n_colors {
+        let idx = loop {
+            let Some(i) = heap.remove(&boxes) else {
+                break 'outer; // 堆空（PIL `goto done`）
+            };
+            if boxes[i].as_ref().unwrap().volume() > 1 {
+                break i;
+            }
         };
-        if let Some((b1, b2)) = boxes[idx].split() {
-            boxes[idx] = b1;
-            boxes.push(b2);
+        if let Some((b1, b2)) = boxes[idx].as_ref().unwrap().split() {
+            let l = boxes.len();
+            boxes.push(Some(b1));
+            children.push((0, 0)); // 占位（叶盒无子）
+            let r = boxes.len();
+            boxes.push(Some(b2));
+            children.push((0, 0));
+            boxes[idx] = None; // 内部节点
+            children[idx] = (l, r);
+            heap.add(l, &boxes);
+            heap.add(r, &boxes);
         } else {
-            break; // 无法再分裂（颜色数不足）
+            break;
         }
     }
-    let mut result: Vec<(u32, [u8; 3])> = boxes.iter().map(Box::mean).collect();
-    result.sort_by_key(|x| std::cmp::Reverse(x.0)); // count 降序（稳定排序）
-    result
+    // 左优先前序遍历叶盒（PIL `annotate_hash_table` 的调色板索引序）
+    fn traverse(
+        node: usize,
+        boxes: &[Option<Box>],
+        children: &[(usize, usize)],
+        order: &mut Vec<usize>,
+    ) {
+        if boxes[node].is_some() {
+            order.push(node);
+        } else {
+            let (l, r) = children[node];
+            traverse(l, boxes, children, order);
+            traverse(r, boxes, children, order);
+        }
+    }
+    let mut order = Vec::new();
+    traverse(0, &boxes, &children, &mut order);
+    (boxes, order)
+}
+
+/// 颜色直方图（PIL quantize 全流程复刻）：
+/// 盒树 → 调色板（均值色）→ 每像素最近调色板精化（4×初始距离界）→ count 降序。
+fn color_histogram(img: &RgbImage, n_colors: u32) -> Value {
+    let (boxes, order) = median_cut_boxes(img, n_colors);
+    let n = order.len();
+    // 调色板按树遍历序（PIL `annotate_hash_table` 的索引序）；order 均为叶盒（Some）
+    let palette: Vec<[u8; 3]> = order
+        .iter()
+        .map(|&i| boxes[i].as_ref().unwrap().mean().1)
+        .collect();
+    // 调色板两两平方距离 + 每入口按距离排序（PIL avgDist/avgDistSortKey）
+    let dist2 = |a: [u8; 3], b: [u8; 3]| -> u32 {
+        let d = |x: u8, y: u8| (i32::from(x) - i32::from(y)).pow(2) as u32;
+        d(a[0], b[0]) + d(a[1], b[1]) + d(a[2], b[2])
+    };
+    let avg_dist: Vec<Vec<u32>> = (0..n)
+        .map(|i| (0..n).map(|j| dist2(palette[i], palette[j])).collect())
+        .collect();
+    let sort_key: Vec<Vec<usize>> = (0..n)
+        .map(|i| {
+            let mut v: Vec<usize> = (0..n).collect();
+            v.sort_by_key(|&j| avg_dist[i][j]);
+            v
+        })
+        .collect();
+    // 每 distinct 颜色 → 盒索引（盒树划分颜色，恰属一盒）→ 遍历序调色板索引
+    let mut hist: HashMap<[u8; 3], u32> = HashMap::new();
+    for px in img.data.as_chunks::<3>().0 {
+        *hist.entry([px[0], px[1], px[2]]).or_insert(0) += 1;
+    }
+    let mut counts = vec![0u32; n];
+    for (color, cnt) in &hist {
+        let box_idx = boxes
+            .iter()
+            .position(|b| {
+                b.as_ref()
+                    .is_some_and(|bb| bb.colors.iter().any(|(c, _)| c == color))
+            })
+            .expect("color must be in a box");
+        let pal_idx = order
+            .iter()
+            .position(|&i| i == box_idx)
+            .expect("box must be in traversal order");
+        // 最近调色板精化：初始距离 ×4 为界，搜索更近的调色板色
+        let initial = dist2(*color, palette[pal_idx]);
+        let mut best = pal_idx;
+        let mut best_dist = initial;
+        let bound = initial * 4;
+        for &j in &sort_key[pal_idx] {
+            if avg_dist[pal_idx][j] <= bound {
+                let d = dist2(*color, palette[j]);
+                if d < best_dist {
+                    best_dist = d;
+                    best = j;
+                }
+            } else {
+                break;
+            }
+        }
+        counts[best] += cnt;
+    }
+    // 输出按 count 降序（稳定）；平局保持调色板索引序（PIL getcolors 直方图序 + 稳定排序）
+    let total = f64::from(img.width * img.height);
+    let mut entries: Vec<(u32, [u8; 3])> = counts
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| **c > 0)
+        .map(|(i, c)| (*c, palette[i]))
+        .collect();
+    entries.sort_by_key(|x| std::cmp::Reverse(x.0));
+    let colors: Vec<Value> = entries
+        .iter()
+        .map(|(count, rgb)| {
+            json!({
+                "hex": format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]),
+                "rgb": [rgb[0], rgb[1], rgb[2]],
+                "count": count,
+                "percent": py_round_n(f64::from(*count) / total * 100.0, 2),
+            })
+        })
+        .collect();
+    json!(colors)
 }
 
 // ---------------------------------------------------------------- Otsu 阈值
@@ -172,23 +378,6 @@ fn otsu_threshold(gray: &[u8]) -> f64 {
 }
 
 // ---------------------------------------------------------------- 统计输出
-
-/// 颜色直方图（MEDIANCUT 量化 → 按面积降序）。
-fn color_histogram(img: &RgbImage, n_colors: u32) -> Value {
-    let total = f64::from(img.width * img.height);
-    let colors: Vec<Value> = median_cut(img, n_colors)
-        .iter()
-        .map(|(count, rgb)| {
-            json!({
-                "hex": format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]),
-                "rgb": [rgb[0], rgb[1], rgb[2]],
-                "count": count,
-                "percent": py_round_n(f64::from(*count) / total * 100.0, 2),
-            })
-        })
-        .collect();
-    json!(colors)
-}
 
 /// Otsu 前景/背景面积比。
 fn area_ratios(gray: &[u8]) -> Value {
@@ -325,19 +514,21 @@ mod tests {
     fn median_cut_solid_color() {
         // 纯色图 → 1 个盒
         let im = img(2, 2, &[255, 0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0]);
-        let r = median_cut(&im, 8);
+        let (r, order) = median_cut_boxes(&im, 8);
         assert_eq!(r.len(), 1);
-        assert_eq!(r[0], (4, [255, 0, 0]));
+        assert_eq!(order, vec![0]);
+        assert_eq!(r[0].as_ref().unwrap().mean(), (4, [255, 0, 0]));
     }
 
     #[test]
     fn median_cut_two_colors() {
-        // 红 2px + 蓝 2px → 2 个盒，count 降序
+        // 红 2px + 蓝 2px → 2 个盒
         let im = img(2, 2, &[255, 0, 0, 255, 0, 0, 0, 0, 255, 0, 0, 255]);
-        let r = median_cut(&im, 8);
-        assert_eq!(r.len(), 2);
-        assert_eq!(r[0].1, [255, 0, 0]);
-        assert_eq!(r[1].1, [0, 0, 255]);
+        let (r, order) = median_cut_boxes(&im, 8);
+        assert_eq!(r.len(), 3); // 根 + 2 叶（根为内部节点 None）
+        assert_eq!(order.len(), 2);
+        assert_eq!(r[order[0]].as_ref().unwrap().mean().1, [255, 0, 0]);
+        assert_eq!(r[order[1]].as_ref().unwrap().mean().1, [0, 0, 255]);
     }
 
     #[test]
