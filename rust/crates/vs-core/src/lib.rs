@@ -18,6 +18,7 @@ pub mod edge;
 pub mod fusion;
 pub mod geometry;
 pub mod image;
+pub mod layout;
 pub mod ocr;
 pub mod omniparser;
 pub mod pix;
