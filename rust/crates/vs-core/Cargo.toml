@@ -1,0 +1,10 @@
+[package]
+name = "vs-core"
+description = "pi-vision-struct V4 数理化视觉核心算法库（schema v3 输出契约与 Python 版逐字段兼容）"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

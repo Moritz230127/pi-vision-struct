@@ -1,0 +1,11 @@
+[package]
+name = "vs-bin"
+description = "pi-vision-struct V4 单二进制 CLI（clap 子命令 = action 枚举）"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+vs-core = { path = "../vs-core" }
+clap.workspace = true
+serde_json.workspace = true
