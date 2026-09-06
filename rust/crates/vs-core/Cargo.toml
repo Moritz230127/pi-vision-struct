@@ -12,5 +12,6 @@ image.workspace = true
 ndarray.workspace = true
 rayon.workspace = true
 vtracer.workspace = true
+rapidocr-core.workspace = true
 regex.workspace = true
 ort.workspace = true
