@@ -21,3 +21,4 @@ landlock = "0.4"
 rustix = "1"
 nix = { version = "0.31", features = ["sched", "mount"] }
 seccompiler = "0.5"
+ort = "2.0.0-rc.13"

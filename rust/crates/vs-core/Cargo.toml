@@ -13,3 +13,4 @@ ndarray.workspace = true
 rayon.workspace = true
 vtracer.workspace = true
 regex.workspace = true
+ort.workspace = true
