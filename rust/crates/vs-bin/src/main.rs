@@ -175,11 +175,8 @@ fn main() {
             image,
             mode,
             max_shapes,
-        } => geometry::run(
-            &image,
-            &geometry::GeometryParams { mode, max_shapes },
-        )
-        .unwrap_or_else(|e| json!({"error": "vs_geometry failed", "detail": e})),
+        } => geometry::run(&image, &geometry::GeometryParams { mode, max_shapes })
+            .unwrap_or_else(|e| json!({"error": "vs_geometry failed", "detail": e})),
     };
     println!("{}", serde_json::to_string_pretty(&out).unwrap());
 }
