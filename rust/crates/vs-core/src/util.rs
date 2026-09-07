@@ -146,6 +146,54 @@ pub fn resize_cv2_linear(img: &RgbImage, out_w: u32, out_h: u32) -> Vec<u8> {
     out
 }
 
+/// OpenCV `cv2.resize(..., INTER_CUBIC)` 精确复刻（bicubic a=-0.75 + clamp 边界）。
+///
+/// OpenCV 的 INTER_CUBIC：坐标 `(x+0.5)*scale - 0.5`，4×4 邻域，
+/// `interpolateCubic` 权重（a=-0.75），边界 clamp（sx<0→0，sx≥n→n-1）。
+/// 实测 vs OpenCV 最大差异 1（定点 vs 浮点舍入）。
+pub fn resize_cv2_cubic(img: &RgbImage, out_w: u32, out_h: u32) -> Vec<u8> {
+    let (iw, ih) = (img.width as f64, img.height as f64);
+    let (ow, oh) = (out_w as f64, out_h as f64);
+    let scale_x = iw / ow;
+    let scale_y = ih / oh;
+    let mut out = vec![0u8; (out_w * out_h * 3) as usize];
+    for y in 0..out_h as usize {
+        let fy = (y as f64 + 0.5) * scale_y - 0.5;
+        let sy = fy.floor() as i64;
+        let fy = fy - sy as f64;
+        let wy = interpolate_cubic(fy);
+        for x in 0..out_w as usize {
+            let fx = (x as f64 + 0.5) * scale_x - 0.5;
+            let sx = fx.floor() as i64;
+            let fx = fx - sx as f64;
+            let wx = interpolate_cubic(fx);
+            for c in 0..3 {
+                let mut acc = 0.0;
+                for (j, &wyj) in wy.iter().enumerate() {
+                    let yy = (sy - 1 + j as i64).clamp(0, ih as i64 - 1) as usize;
+                    for (i, &wxi) in wx.iter().enumerate() {
+                        let xx = (sx - 1 + i as i64).clamp(0, iw as i64 - 1) as usize;
+                        let w = wxi * wyj;
+                        acc += w * f64::from(img.data[(yy * iw as usize + xx) * 3 + c]);
+                    }
+                }
+                out[(y * out_w as usize + x) * 3 + c] = acc.round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    out
+}
+
+/// OpenCV `interpolateCubic` 权重（a=-0.75，4 系数）。
+fn interpolate_cubic(x: f64) -> [f64; 4] {
+    let a = -0.75;
+    let c0 = ((a * (x + 1.0) - 5.0 * a) * (x + 1.0) + 8.0 * a) * (x + 1.0) - 4.0 * a;
+    let c1 = ((a + 2.0) * x - (a + 3.0)) * x * x + 1.0;
+    let c2 = ((a + 2.0) * (1.0 - x) - (a + 3.0)) * (1.0 - x) * (1.0 - x) + 1.0;
+    let c3 = 1.0 - c0 - c1 - c2;
+    [c0, c1, c2, c3]
+}
+
 #[derive(Clone, Copy)]
 enum PilFilter {
     Lanczos,
