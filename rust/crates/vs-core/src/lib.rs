@@ -34,4 +34,6 @@ pub mod saliency;
 pub mod scene_stats;
 pub mod schema;
 pub mod segment;
+pub mod setup;
 pub mod util;
+pub mod wall;

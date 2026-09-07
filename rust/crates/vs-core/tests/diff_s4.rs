@@ -41,7 +41,7 @@ fn bbox_iou(a: &[f64], b: &[f64]) -> f64 {
 fn assert_num(a: &Value, b: &Value, path: &str, tol: f64) {
     let (xf, yf) = (a.as_f64().unwrap(), b.as_f64().unwrap());
     let effective = if path.ends_with(".pixels") {
-        50.0 // resize 滤波器微差导致的掩码像素数差异
+        5.0 // PIL 精确 LANCZOS/BILINEAR 后掩码像素数一致（实测 diff=0）
     } else if path.contains(".depth.global") {
         0.03
     } else {

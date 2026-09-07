@@ -11,7 +11,7 @@ use std::path::Path;
 use rayon::prelude::*;
 use serde_json::{json, Value};
 
-use crate::color::{contrast_ratio, parse_hex, rgb_to_hex, rgb_to_lab};
+use crate::color::{contrast_ratio, parse_hex, rgb_to_hex, rgb_to_lab_skimage};
 use crate::image::{load_rgb, RgbImage};
 use crate::util::{py_round_i64, py_round_n};
 
@@ -56,10 +56,10 @@ fn slic(img: &RgbImage, n_segments: u32) -> Vec<u32> {
             *v /= range;
         }
     }
-    // RGB(0-255) → Lab（color.rs 的 D65 矩阵与 skimage rgb2lab 实测误差 <0.005 Lab）
+    // RGB(0-255) → Lab（skimage 精确矩阵，与 skimage rgb2lab 逐位一致）
     let mut lab = vec![0.0f64; n * 3];
     for (i, px) in fimg.as_chunks::<3>().0.iter().enumerate() {
-        let l = rgb_to_lab([px[0] * 255.0, px[1] * 255.0, px[2] * 255.0]);
+        let l = rgb_to_lab_skimage([px[0] * 255.0, px[1] * 255.0, px[2] * 255.0]);
         lab[i * 3] = l[0];
         lab[i * 3 + 1] = l[1];
         lab[i * 3 + 2] = l[2];

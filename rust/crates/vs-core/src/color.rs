@@ -32,13 +32,45 @@ pub fn contrast_ratio(fg: [f64; 3], bg: [f64; 3]) -> f64 {
     (l1 + 0.05) / (l2 + 0.05)
 }
 
-/// sRGB → CIE Lab（D65 白点）。
+/// sRGB → CIE Lab（D65 白点，与 Python `vs_schema.py` 逐字段一致）。
 pub fn rgb_to_lab(rgb: [f64; 3]) -> [f64; 3] {
     let [r, g, b] = rgb.map(srgb_to_linear);
     // sRGB → XYZ (D65)
     let x = 0.4124564 * r + 0.3575761 * g + 0.1804375 * b;
     let y = 0.2126729 * r + 0.7151522 * g + 0.0721750 * b;
     let z = 0.0193339 * r + 0.1191920 * g + 0.9503041 * b;
+    let (x, y, z) = (x / 0.95047, y / 1.0, z / 1.08883);
+
+    fn f(t: f64) -> f64 {
+        if t > 0.008856 {
+            t.powf(1.0 / 3.0)
+        } else {
+            7.787 * t + 16.0 / 116.0
+        }
+    }
+
+    let (fx, fy, fz) = (f(x), f(y), f(z));
+    [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
+}
+
+/// sRGB → CIE Lab（skimage `rgb2lab` 精确矩阵，供 SLIC 等与 skimage 对齐的路径）。
+///
+/// 与 skimage `colorconv.py` 逐细节一致：线性化阈值 0.04045（sRGB 标准）、
+/// XYZ 矩阵 0.412453/0.357580/0.180423 等、白点 0.95047/1.0/1.08883。
+pub fn rgb_to_lab_skimage(rgb: [f64; 3]) -> [f64; 3] {
+    let lin = |c: f64| -> f64 {
+        let c = c / 255.0;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let [r, g, b] = rgb.map(lin);
+    // skimage rgb2xyz 精确矩阵（sRGB → XYZ D65）
+    let x = 0.412453 * r + 0.357580 * g + 0.180423 * b;
+    let y = 0.212671 * r + 0.715160 * g + 0.072169 * b;
+    let z = 0.019334 * r + 0.119193 * g + 0.950227 * b;
     let (x, y, z) = (x / 0.95047, y / 1.0, z / 1.08883);
 
     fn f(t: f64) -> f64 {

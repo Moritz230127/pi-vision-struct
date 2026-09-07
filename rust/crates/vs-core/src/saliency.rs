@@ -5,10 +5,10 @@
 
 use std::path::Path;
 
-use image::imageops::FilterType;
 use serde_json::{json, Value};
 
 use crate::image::load_rgb;
+use crate::util::{resize_bilinear, resize_lanczos};
 
 /// 显著性参数（对应 Python `--top-n/--min-score`）。
 pub struct SaliencyParams {
@@ -26,21 +26,16 @@ fn weights_path() -> String {
 /// 返回 (CHW 数据, 原图宽高)。
 fn preprocess(img: &crate::image::RgbImage) -> Result<(Vec<f32>, u32, u32), String> {
     let (w, h) = (img.width, img.height);
-    // resize 到 320×320（PIL LANCZOS 近似）
-    let resized = image::imageops::resize(
-        &image::RgbImage::from_raw(w, h, img.data.clone()).ok_or("image decode")?,
-        320,
-        320,
-        FilterType::Lanczos3,
-    );
+    // resize 到 320×320（PIL LANCZOS 精确复刻）
+    let resized_data = resize_lanczos(img, 320, 320);
     let mut data = vec![0.0f32; 3 * 320 * 320];
     let mean = [0.485f32, 0.456, 0.406];
     let std = [0.229f32, 0.224, 0.225];
     for y in 0..320usize {
         for x in 0..320usize {
-            let px = resized.get_pixel(x as u32, y as u32);
+            let i = (y * 320 + x) * 3;
             for c in 0..3 {
-                let v = f32::from(px[c]) / 255.0;
+                let v = f32::from(resized_data[i + c]) / 255.0;
                 data[c * 320 * 320 + y * 320 + x] = (v - mean[c]) / std[c];
             }
         }
@@ -113,15 +108,25 @@ pub fn run(path: &Path, p: &SaliencyParams) -> Result<Value, String> {
     let (sh, sw) = (320usize, 320usize);
     let sal_clipped: Vec<f32> = sal_data.iter().map(|v| v.clamp(0.0, 1.0)).collect();
 
-    // 上采样回原图（BILINEAR）
-    let sal_img = image::GrayImage::from_raw(
-        sw as u32,
-        sh as u32,
-        sal_clipped.iter().map(|v| (v * 255.0) as u8).collect(),
-    )
-    .ok_or("sal 图构造失败")?;
-    let sal_full = image::imageops::resize(&sal_img, w, h, FilterType::Triangle);
-    let sal_full_f: Vec<f32> = sal_full.iter().map(|v| f32::from(*v) / 255.0).collect();
+    // 上采样回原图（PIL BILINEAR 精确复刻）
+    let sal_rgb = crate::image::RgbImage {
+        width: sw as u32,
+        height: sh as u32,
+        data: sal_clipped
+            .iter()
+            .flat_map(|v| {
+                let g = (v * 255.0) as u8;
+                [g, g, g]
+            })
+            .collect(),
+    };
+    let sal_full_data = resize_bilinear(&sal_rgb, w, h);
+    let sal_full_f: Vec<f32> = sal_full_data
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|p| f32::from(p[0]) / 255.0)
+        .collect();
 
     // 连通域提取候选区域
     let binary: Vec<bool> = sal_full_f.iter().map(|v| *v > p.min_score as f32).collect();

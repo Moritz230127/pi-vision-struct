@@ -9,6 +9,7 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 use crate::image::load_rgb;
+use crate::util::resize_lanczos;
 
 /// OmniParser 参数（对应 Python `--box-threshold/--max-items`）。
 pub struct OmniparserParams {
@@ -171,20 +172,15 @@ fn detect_icons(img: &crate::image::RgbImage, min_conf: f64) -> Result<Vec<DetBo
     let pad_left = (640 - rw) / 2;
     let pad_top = (640 - rh) / 2;
     let mut data = vec![114.0f32 / 255.0; 3 * 640 * 640]; // 灰边（channel 优先布局）
-                                                          // Lanczos3 resize（与 Python `Image.Resampling.LANCZOS` 一致）
-    let resized = image::imageops::resize(
-        &img.data_view(),
-        rw as u32,
-        rh as u32,
-        image::imageops::FilterType::Lanczos3,
-    );
+    // LANCZOS resize（PIL 精确复刻）
+    let resized_data = resize_lanczos(img, rw as u32, rh as u32);
     for y in 0..rh {
         for x in 0..rw {
-            let p = resized.get_pixel(x as u32, y as u32);
+            let i = (y * rw + x) * 3;
             let di = (y + pad_top) * 640 + (x + pad_left);
-            data[di] = p[0] as f32 / 255.0;
-            data[640 * 640 + di] = p[1] as f32 / 255.0;
-            data[2 * 640 * 640 + di] = p[2] as f32 / 255.0;
+            data[di] = resized_data[i] as f32 / 255.0;
+            data[640 * 640 + di] = resized_data[i + 1] as f32 / 255.0;
+            data[2 * 640 * 640 + di] = resized_data[i + 2] as f32 / 255.0;
         }
     }
     let tensor = ort::value::Tensor::from_array(([1usize, 3, 640, 640], data.into_boxed_slice()))

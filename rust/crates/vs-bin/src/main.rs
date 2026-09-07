@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
 use serde_json::json;
 use vs_core::{
     a11y, ascii, audit, blend, capture, depth, detect, dom, edge, fusion, geometry, layout, ocr,
-    omniparser, pdf, pix, pptx, rules, saliency, scene_stats, segment,
+    omniparser, pdf, pix, pptx, rules, saliency, scene_stats, segment, setup, wall,
 };
 
 /// 数理化视觉套件 V4（全面 Rust 重写）。
@@ -210,6 +210,19 @@ enum Command {
         #[arg(long, default_value_t = 0.25)]
         min_conf: f64,
     },
+    /// 壁纸批量程序化分类（主色/亮度/饱和度/宽高比）。
+    Wall {
+        #[arg(long)]
+        dir: PathBuf,
+        #[arg(long, default_value_t = 5)]
+        colors: u32,
+        #[arg(long, default_value_t = 200)]
+        max_files: u32,
+    },
+    /// 只读健康检查（模型存在性 + 二进制完整性 + 环境检测）。
+    Check,
+    /// 安装引导（模型目录创建 + 下载 URL 提示）。
+    Setup,
 }
 
 fn main() {
@@ -395,6 +408,17 @@ fn main() {
             },
         )
         .unwrap_or_else(|e| json!({"error": "vs_detect failed", "detail": e})),
+        Command::Wall { dir, colors, max_files } => wall::run(
+            &dir,
+            &wall::WallParams {
+                colors,
+                max_files,
+                ..wall::WallParams::default()
+            },
+        )
+        .unwrap_or_else(|e| json!({"error": "vs_wall failed", "detail": e})),
+        Command::Check => setup::check(),
+        Command::Setup => setup::setup(),
     };
     println!("{}", serde_json::to_string_pretty(&out).unwrap());
 }

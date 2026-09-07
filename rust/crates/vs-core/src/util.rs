@@ -1,4 +1,6 @@
-//! 基础工具：Python 语义兼容的取整。
+//! 基础工具：Python 语义兼容的取整 + PIL 精确 resize 内核。
+
+use crate::image::RgbImage;
 
 /// Python `round(x)` 语义：**银行家舍入**（round half to even）。
 ///
@@ -86,9 +88,252 @@ pub fn py_round_n(v: f64, n: i32) -> f64 {
     }
 }
 
+/// PIL `Image.resize(..., Image.LANCZOS)` 精确复刻：两遍分离 + 定点量化。
+///
+/// 与 PIL `Resample.c` 逐细节一致：
+/// - 内核 `lanczos(x) = sinc(x)·sinc(x/3)`（|x|<3，否则 0）
+/// - `center = (xx + 0.5)·scale`（无 -0.5）；权重参数 `(x+xmin-center+0.5)/filterscale`
+/// - `filterscale = max(scale, 1.0)`；`support = 3.0·filterscale`；窗口四舍五入
+/// - 权重归一化 → 定点量化（×2^22，round-half-away）→ INT32 累加（偏置 2^21）→ clip8
+/// - 两遍分离：先水平到临时图，再垂直
+///
+/// 返回 RGB8 交错数据（`out_w × out_h × 3`）。
+pub fn resize_lanczos(img: &RgbImage, out_w: u32, out_h: u32) -> Vec<u8> {
+    pil_resize(img, out_w, out_h, PilFilter::Lanczos)
+}
+
+/// PIL `Image.resize(..., Image.BILINEAR)` 精确复刻（triangle 内核，同两遍分离机制）。
+pub fn resize_bilinear(img: &RgbImage, out_w: u32, out_h: u32) -> Vec<u8> {
+    pil_resize(img, out_w, out_h, PilFilter::Bilinear)
+}
+
+#[derive(Clone, Copy)]
+enum PilFilter {
+    Lanczos,
+    Bilinear,
+}
+
+/// PIL 内核：lanczos（3-lobe）与 triangle（双线性）。
+fn kernel(f: PilFilter, x: f64) -> f64 {
+    match f {
+        PilFilter::Lanczos => {
+            if x == 0.0 {
+                return 1.0;
+            }
+            if x < -3.0 || x >= 3.0 {
+                return 0.0;
+            }
+            let px = x * std::f64::consts::PI;
+            let pxr = px / 3.0;
+            (px.sin() / px) * (pxr.sin() / pxr)
+        }
+        PilFilter::Bilinear => {
+            if x < -1.0 || x > 1.0 {
+                0.0
+            } else {
+                1.0 - x.abs()
+            }
+        }
+    }
+}
+
+/// PIL `precompute_coeffs`：每输出像素的窗口边界 + 归一化定点权重。
+/// 返回 (bounds[out*2], kk[out*ksize], ksize)。
+fn precompute_coeffs(
+    in_size: usize,
+    out_size: usize,
+    f: PilFilter,
+) -> (Vec<i32>, Vec<i64>, usize) {
+    const PRECISION_BITS: i32 = 22;
+    let (support_base, _) = match f {
+        PilFilter::Lanczos => (3.0, ()),
+        PilFilter::Bilinear => (1.0, ()),
+    };
+    let scale = in_size as f64 / out_size as f64;
+    let filterscale = scale.max(1.0);
+    let support = support_base * filterscale;
+    let ksize = (support.ceil() as usize) * 2 + 1;
+    let inv_filterscale = 1.0 / filterscale;
+    let mut bounds = vec![0i32; out_size * 2];
+    let mut kk = vec![0i64; out_size * ksize];
+    for xx in 0..out_size {
+        let center = (xx as f64 + 0.5) * scale;
+        let mut xmin = (center - support + 0.5) as i64; // C (int) 截断
+        if xmin < 0 {
+            xmin = 0;
+        }
+        let mut xmax = (center + support + 0.5) as i64;
+        if xmax > in_size as i64 {
+            xmax = in_size as i64;
+        }
+        xmax -= xmin;
+        let mut ww = 0.0f64;
+        let mut k = vec![0.0f64; xmax as usize];
+        for (x, kv) in k.iter_mut().enumerate() {
+            let w = kernel(f, (x as f64 + xmin as f64 - center + 0.5) * inv_filterscale);
+            *kv = w;
+            ww += w;
+        }
+        if ww != 0.0 {
+            for kv in k.iter_mut() {
+                *kv /= ww;
+            }
+        }
+        let scale_fixed = (1i64 << PRECISION_BITS) as f64;
+        for x in 0..xmax as usize {
+            kk[xx * ksize + x] = if k[x] < 0.0 {
+                (-0.5 + k[x] * scale_fixed) as i64
+            } else {
+                (0.5 + k[x] * scale_fixed) as i64
+            };
+        }
+        bounds[xx * 2] = xmin as i32;
+        bounds[xx * 2 + 1] = xmax as i32;
+    }
+    (bounds, kk, ksize)
+}
+
+/// PIL `clip8`：`clip8_lookups[in >> 22]`（<0 → 0，>255 → 255）。
+fn clip8(v: i64) -> u8 {
+    let idx = (v >> 22) as i32;
+    if idx <= 0 {
+        0
+    } else if idx >= 255 {
+        255
+    } else {
+        idx as u8
+    }
+}
+
+/// PIL 两遍分离 resize（水平 → 垂直），RGB8 交错输出。
+fn pil_resize(img: &RgbImage, out_w: u32, out_h: u32, f: PilFilter) -> Vec<u8> {
+    const PRECISION_BITS: i32 = 22;
+    let (in_w, in_h) = (img.width as usize, img.height as usize);
+    let (ow, oh) = (out_w as usize, out_h as usize);
+    // 水平 pass → 临时图（ow × in_h）
+    let (bounds_h, kk_h, ksize_h) = precompute_coeffs(in_w, ow, f);
+    let mut temp = vec![0u8; ow * in_h * 3];
+    for yy in 0..in_h {
+        let line_in = &img.data[yy * in_w * 3..(yy + 1) * in_w * 3];
+        for xx in 0..ow {
+            let xmin = bounds_h[xx * 2] as usize;
+            let xmax = bounds_h[xx * 2 + 1] as usize;
+            let k = &kk_h[xx * ksize_h..(xx + 1) * ksize_h];
+            let mut ss = [1i64 << (PRECISION_BITS - 1); 3];
+            for x in 0..xmax {
+                let px = &line_in[(x + xmin) * 3..(x + xmin) * 3 + 3];
+                ss[0] += i64::from(px[0]) * k[x];
+                ss[1] += i64::from(px[1]) * k[x];
+                ss[2] += i64::from(px[2]) * k[x];
+            }
+            let o = (yy * ow + xx) * 3;
+            temp[o] = clip8(ss[0]);
+            temp[o + 1] = clip8(ss[1]);
+            temp[o + 2] = clip8(ss[2]);
+        }
+    }
+    // 垂直 pass → 输出（ow × oh）
+    let (bounds_v, kk_v, ksize_v) = precompute_coeffs(in_h, oh, f);
+    let mut out = vec![0u8; ow * oh * 3];
+    for yy in 0..oh {
+        let ymin = bounds_v[yy * 2] as usize;
+        let ymax = bounds_v[yy * 2 + 1] as usize;
+        let k = &kk_v[yy * ksize_v..(yy + 1) * ksize_v];
+        for xx in 0..ow {
+            let mut ss = [1i64 << (PRECISION_BITS - 1); 3];
+            for (y, kv) in k.iter().enumerate().take(ymax) {
+                let o = ((y + ymin) * ow + xx) * 3;
+                ss[0] += i64::from(temp[o]) * kv;
+                ss[1] += i64::from(temp[o + 1]) * kv;
+                ss[2] += i64::from(temp[o + 2]) * kv;
+            }
+            let o = (yy * ow + xx) * 3;
+            out[o] = clip8(ss[0]);
+            out[o + 1] = clip8(ss[1]);
+            out[o + 2] = clip8(ss[2]);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::py_round;
+    use crate::image::RgbImage;
+
+    /// 5×4 渐变图（与 Python golden 同源）。
+    fn grad_5x4() -> RgbImage {
+        let mut data = Vec::new();
+        for y in 0..4u32 {
+            for x in 0..5u32 {
+                data.push((x * 50 % 256) as u8);
+                data.push((y * 60 % 256) as u8);
+                data.push(((x + y) * 30 % 256) as u8);
+            }
+        }
+        RgbImage { width: 5, height: 4, data }
+    }
+
+    #[test]
+    fn lanczos_matches_pil() {
+        use super::resize_lanczos;
+        // PIL golden：5×4 → 8×7 LANCZOS（首行 + 末行抽样）
+        let out = resize_lanczos(&grad_5x4(), 8, 7);
+        // 首行：[(0,0,0),(15,0,7),(54,0,30),(87,0,50),(113,0,66),(146,0,86),(185,0,109),(204,0,120)]
+        let row0: Vec<[u8; 3]> = (0..8).map(|x| [out[x * 3], out[x * 3 + 1], out[x * 3 + 2]]).collect();
+        let expect0 = [
+            [0, 0, 0], [15, 0, 7], [54, 0, 30], [87, 0, 50],
+            [113, 0, 66], [146, 0, 86], [185, 0, 109], [204, 0, 120],
+        ];
+        assert_eq!(row0, expect0, "LANCZOS 首行与 PIL 不一致");
+        // 末行（y=6）：[(0,185,90),(15,185,101),...]
+        let row6: Vec<[u8; 3]> = (0..8)
+            .map(|x| {
+                let i = (6 * 8 + x) * 3;
+                [out[i], out[i + 1], out[i + 2]]
+            })
+            .collect();
+        let expect6 = [
+            [0, 185, 90], [15, 185, 101], [54, 185, 124], [87, 185, 144],
+            [113, 185, 160], [146, 185, 180], [185, 185, 203], [204, 185, 214],
+        ];
+        assert_eq!(row6, expect6, "LANCZOS 末行与 PIL 不一致");
+        // 放大 2×：5×4 → 10×8
+        let out2 = resize_lanczos(&grad_5x4(), 10, 8);
+        let p = |x: u32, y: u32| -> [u8; 3] {
+            let i = (y * 10 + x) * 3;
+            [out2[i as usize], out2[i as usize + 1], out2[i as usize + 2]]
+        };
+        assert_eq!(p(0, 0), [0, 0, 0]);
+        assert_eq!(p(9, 0), [205, 0, 120]);
+        assert_eq!(p(4, 3), [90, 77, 92]);
+        assert_eq!(p(4, 4), [90, 103, 106]);
+        assert_eq!(p(9, 7), [205, 186, 216]);
+    }
+
+    #[test]
+    fn bilinear_matches_pil() {
+        use super::resize_bilinear;
+        // PIL golden：5×4 → 8×7 BILINEAR（首行 + 末行抽样）
+        let out = resize_bilinear(&grad_5x4(), 8, 7);
+        let row0: Vec<[u8; 3]> = (0..8).map(|x| [out[x * 3], out[x * 3 + 1], out[x * 3 + 2]]).collect();
+        let expect0 = [
+            [0, 0, 0], [22, 0, 13], [53, 0, 32], [84, 0, 51],
+            [116, 0, 69], [147, 0, 88], [178, 0, 107], [200, 0, 120],
+        ];
+        assert_eq!(row0, expect0, "BILINEAR 首行与 PIL 不一致");
+        let row6: Vec<[u8; 3]> = (0..8)
+            .map(|x| {
+                let i = (6 * 8 + x) * 3;
+                [out[i], out[i + 1], out[i + 2]]
+            })
+            .collect();
+        let expect6 = [
+            [0, 180, 90], [22, 180, 103], [53, 180, 122], [84, 180, 141],
+            [116, 180, 159], [147, 180, 178], [178, 180, 197], [200, 180, 210],
+        ];
+        assert_eq!(row6, expect6, "BILINEAR 末行与 PIL 不一致");
+    }
 
     #[test]
     fn matches_python_round() {

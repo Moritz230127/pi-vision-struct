@@ -19,8 +19,8 @@ pub struct SceneStatsParams {
 // ---------------------------------------------------------------- MEDIANCUT 量化
 
 /// 量化盒：一组 (RGB, count) 颜色 + 总像素数。
-struct Box {
-    colors: Vec<([u8; 3], u32)>,
+pub(crate) struct Box {
+    pub(crate) colors: Vec<([u8; 3], u32)>,
     pixel_count: u32,
 }
 
@@ -107,7 +107,7 @@ impl Box {
     /// 盒的均值色（按 count 加权）+ 总像素数（对应 PIL getcolors 的 count）。
     ///
     /// 颜色取整为 **round-half-up**（PIL `(int)(.5 + avg/count)`），非整数除法截断。
-    fn mean(&self) -> (u32, [u8; 3]) {
+    pub(crate) fn mean(&self) -> (u32, [u8; 3]) {
         let (mut r, mut g, mut b, mut n) = (0u64, 0u64, 0u64, 0u64);
         for (c, cnt) in &self.colors {
             r += u64::from(c[0]) * u64::from(*cnt);
@@ -186,7 +186,7 @@ impl BoxHeap {
 /// 返回盒数组（内部节点为 `None`）+ 树遍历序（调色板索引 = 左优先前序遍历）。
 ///
 /// 树结构：分裂时父盒标记为内部节点（`None`），左右子各占新索引。
-fn median_cut_boxes(img: &RgbImage, n_colors: u32) -> (Vec<Option<Box>>, Vec<usize>) {
+pub(crate) fn median_cut_boxes(img: &RgbImage, n_colors: u32) -> (Vec<Option<Box>>, Vec<usize>) {
     let mut hist: HashMap<[u8; 3], u32> = HashMap::new();
     for px in img.data.as_chunks::<3>().0 {
         *hist.entry([px[0], px[1], px[2]]).or_insert(0) += 1;

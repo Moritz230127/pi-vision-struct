@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use image::imageops::FilterType;
+use crate::util::{resize_bilinear, resize_lanczos};
 use serde_json::{json, Value};
 
 use crate::image::load_rgb;
@@ -55,21 +55,16 @@ pub fn run(path: &Path, p: &DepthParams) -> Result<Value, String> {
     let img = load_rgb(path)?;
     let (w, h) = (img.width, img.height);
 
-    // 预处理：resize 256×256 LANCZOS → /255 → ImageNet 归一化 → CHW → batch 1
-    let resized = image::imageops::resize(
-        &image::RgbImage::from_raw(w, h, img.data.clone()).ok_or("image decode")?,
-        256,
-        256,
-        FilterType::Lanczos3,
-    );
+    // 预处理：resize 256×256 LANCZOS（PIL 精确复刻）→ /255 → ImageNet 归一化 → CHW
+    let resized_data = resize_lanczos(&img, 256, 256);
     let mut data = vec![0.0f32; 3 * 256 * 256];
     let mean = [0.485f32, 0.456, 0.406];
     let std = [0.229f32, 0.224, 0.225];
     for y in 0..256usize {
         for x in 0..256usize {
-            let px = resized.get_pixel(x as u32, y as u32);
+            let i = (y * 256 + x) * 3;
             for c in 0..3 {
-                let v = f32::from(px[c]) / 255.0;
+                let v = f32::from(resized_data[i + c]) / 255.0;
                 data[c * 256 * 256 + y * 256 + x] = (v - mean[c]) / std[c];
             }
         }
@@ -106,15 +101,23 @@ pub fn run(path: &Path, p: &DepthParams) -> Result<Value, String> {
     let (dh, dw) = (256usize, 256usize);
     let dmin = depth_data.iter().cloned().fold(f32::INFINITY, f32::min);
     let dmax = depth_data.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    // 归一化到 [0,1] → uint8 → resize 回原图（BILINEAR）
+    // 归一化到 [0,1] → uint8 → resize 回原图（PIL BILINEAR 精确复刻）
     let norm: Vec<u8> = depth_data
         .iter()
         .map(|v| (((v - dmin) / (dmax - dmin + 1e-9)) * 255.0) as u8)
         .collect();
-    let depth_img =
-        image::GrayImage::from_raw(dw as u32, dh as u32, norm).ok_or("depth 图构造失败")?;
-    let depth_full = image::imageops::resize(&depth_img, w, h, FilterType::Triangle);
-    let depth_full_f: Vec<f32> = depth_full.iter().map(|v| f32::from(*v) / 255.0).collect();
+    let depth_rgb = crate::image::RgbImage {
+        width: dw as u32,
+        height: dh as u32,
+        data: norm.iter().flat_map(|&g| [g, g, g]).collect(),
+    };
+    let depth_full_data = resize_bilinear(&depth_rgb, w, h);
+    let depth_full_f: Vec<f32> = depth_full_data
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|p| f32::from(p[0]) / 255.0)
+        .collect();
 
     // 全局深度统计
     let global_stats = depth_stats(&depth_full_f);
