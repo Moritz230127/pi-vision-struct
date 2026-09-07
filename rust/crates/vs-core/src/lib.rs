@@ -24,6 +24,7 @@ pub mod detect;
 pub mod dom;
 pub mod edge;
 pub mod element_fusion;
+pub mod events;
 pub mod fusion;
 pub mod geometry;
 pub mod gui;

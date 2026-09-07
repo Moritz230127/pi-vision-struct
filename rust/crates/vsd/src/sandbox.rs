@@ -22,7 +22,12 @@ impl Default for SandboxConfig {
     fn default() -> Self {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
         Self {
-            writable_dirs: vec![format!("{home}/.cache/vsensor"), "/tmp".to_string()],
+            writable_dirs: vec![
+                format!("{home}/.cache/vsensor"),
+                "/tmp".to_string(),
+                // Stdio::null() 需 O_WRONLY 打开 /dev/null（landlock 只读规则不含 WriteFile）
+                "/dev/null".to_string(),
+            ],
             read_only_dirs: vec!["/".to_string(), "/usr".to_string(), "/etc".to_string()],
             allow_exec: false,
         }
@@ -49,7 +54,12 @@ pub fn apply_landlock(cfg: &SandboxConfig) -> Result<bool, String> {
     let mut ruleset = ruleset;
     for dir in &cfg.read_only_dirs {
         let path = PathFd::new(dir).map_err(|e| format!("landlock path {dir}: {e}"))?;
-        let rule = PathBeneath::new(path, AccessFs::from_read(abi));
+        let mut access = AccessFs::from_read(abi);
+        // allow_exec 时放行受控 exec（spawn niri event-stream 等）
+        if cfg.allow_exec {
+            access |= AccessFs::Execute;
+        }
+        let rule = PathBeneath::new(path, access);
         ruleset = ruleset
             .add_rule(rule)
             .map_err(|e| format!("landlock add_rule {dir}: {e}"))?;

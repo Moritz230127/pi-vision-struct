@@ -38,6 +38,12 @@ struct Cli {
     /// 沙箱（landlock + seccomp + namespace；默认开启）
     #[arg(long, default_value_t = true)]
     sandbox: bool,
+    /// 事件驱动模式：监听 niri event-stream，变化即再感知（默认关闭）
+    #[arg(long)]
+    watch: bool,
+    /// 事件节流（毫秒）
+    #[arg(long, default_value_t = 100)]
+    throttle_ms: u64,
 }
 
 #[tokio::main]
@@ -49,7 +55,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 沙箱：landlock + seccomp + namespace（推理路径全程沙箱化）
     if cli.sandbox {
-        let cfg = SandboxConfig::default();
+        // --watch 模式需要 spawn niri event-stream（受控 exec），放行 execve
+        let cfg = SandboxConfig {
+            allow_exec: cli.watch,
+            ..SandboxConfig::default()
+        };
         match sandbox::apply(&cfg) {
             Ok(()) => println!("[vsd] sandbox applied (landlock + seccomp + namespace)"),
             Err(e) => {
@@ -132,6 +142,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
         None,
     );
+
+    // 事件驱动模式：监听 niri event-stream，变化即再感知
+    if cli.watch {
+        let throttle = cli.throttle_ms;
+        std::thread::spawn(
+            move || match vs_core::events::EventWatcher::start(throttle) {
+                Ok(mut watcher) => {
+                    println!("[vsd] event watch started (throttle={throttle}ms)");
+                    while let Some(ev) = watcher.next_event() {
+                        if ev.triggers_reperception() {
+                            println!("[vsd] event: {ev:?} → 触发再感知");
+                        }
+                    }
+                }
+                Err(e) => eprintln!("[vsd] event watch failed: {e}"),
+            },
+        );
+    }
 
     loop {
         let (stream, _) = listener.accept().await?;
