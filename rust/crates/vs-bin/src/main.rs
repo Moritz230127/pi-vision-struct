@@ -10,8 +10,8 @@ use clap::{Parser, Subcommand};
 use serde_json::json;
 use vs_core::{
     a11y, analyze, ascii, audit, audit3d, blend, capture, cluster, depth, detect, dom, edge,
-    fusion, geometry, layout, ocr, omniparser, pdf, pix, pptx, protocol, rules, saliency,
-    scene_stats, segment, setup, wall,
+    element_fusion, fusion, geometry, layout, ocr, omniparser, pdf, pix, pptx, protocol, rules,
+    saliency, scene_stats, segment, setup, wall,
 };
 
 /// 数理化视觉套件 V4（全面 Rust 重写）。
@@ -40,6 +40,12 @@ enum Command {
         rows: u32,
         #[arg(long)]
         color: bool,
+        /// 元素感知模式（plan3 E5a）：元素区域 2× 字符密度，空白区 1×。
+        #[arg(long)]
+        element_aware: bool,
+        /// 元素 bbox 列表（JSON 数组 [[x1,y1,x2,y2],...]，配合 --element-aware）。
+        #[arg(long)]
+        elements: Option<String>,
     },
     /// 数理化场景统计（MEDIANCUT 直方图 / Otsu 面积比 / 对比度 / 空间布局）。
     #[command(name = "scene_stats")]
@@ -68,6 +74,9 @@ enum Command {
         max_lines: u32,
         #[arg(long, default_value_t = 2000)]
         max_points: u32,
+        /// 输出 16×16 边缘密度热图（默认路径，<1K tokens）；缺省输出原始 edge_point
+        #[arg(long)]
+        density: bool,
     },
     /// 融合引擎（D-S 证据 + 匈牙利匹配）。
     Fusion {
@@ -77,6 +86,19 @@ enum Command {
         /// 匹配组定义 JSON
         #[arg(long)]
         groups: Option<String>,
+    },
+    /// 元素融合层（plan3 E1）：多传感器 → 一份融合元素清单。
+    #[command(name = "fusion_elements")]
+    FusionElements {
+        /// 传感器报告 JSON 路径（可多个）
+        #[arg(long, required = true, num_args = 1..)]
+        reports: Vec<String>,
+        /// bbox IoU 阈值（默认 0.5）
+        #[arg(long, default_value_t = 0.5)]
+        min_iou: f64,
+        /// 最低置信度（默认 0.0）
+        #[arg(long, default_value_t = 0.0)]
+        min_conf: f64,
     },
     /// 设计准则规则引擎（对比度/重叠/对齐/间距/安全区）。
     Rules {
@@ -288,8 +310,29 @@ fn main() {
             cols,
             rows,
             color,
-        } => ascii::run(&image, &ascii::AsciiParams { cols, rows, color })
-            .unwrap_or_else(|e| json!({"error": "vs_ascii failed", "detail": e})),
+            element_aware,
+            elements,
+        } => {
+            let parsed = elements
+                .as_deref()
+                .map(|s| {
+                    serde_json::from_str::<Vec<Vec<f64>>>(s)
+                        .map(|v| v.into_iter().map(|b| [b[0], b[1], b[2], b[3]]).collect())
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
+            ascii::run(
+                &image,
+                &ascii::AsciiParams {
+                    cols,
+                    rows,
+                    color,
+                    element_aware,
+                    elements: parsed,
+                },
+            )
+            .unwrap_or_else(|e| json!({"error": "vs_ascii failed", "detail": e}))
+        }
         Command::SceneStats { image, colors } => {
             scene_stats::run(&image, &scene_stats::SceneStatsParams { colors })
                 .unwrap_or_else(|e| json!({"error": "vs_scene_stats failed", "detail": e}))
@@ -311,6 +354,7 @@ fn main() {
             hough_threshold,
             max_lines,
             max_points,
+            density,
         } => edge::run(
             &image,
             &edge::EdgeParams {
@@ -318,6 +362,7 @@ fn main() {
                 hough_threshold,
                 max_lines,
                 max_points,
+                density,
             },
         )
         .unwrap_or_else(|e| json!({"error": "vs_edge failed", "detail": e})),
@@ -325,6 +370,23 @@ fn main() {
             let paths: Vec<PathBuf> = reports.iter().map(PathBuf::from).collect();
             fusion::run(&paths, groups.as_deref())
                 .unwrap_or_else(|e| json!({"error": "vs_fusion failed", "detail": e}))
+        }
+        Command::FusionElements {
+            reports,
+            min_iou,
+            min_conf,
+        } => {
+            let vals: Vec<serde_json::Value> = reports
+                .iter()
+                .map(|p| {
+                    std::fs::read_to_string(p)
+                        .ok()
+                        .and_then(|s| serde_json::from_str(&s).ok())
+                        .unwrap_or_else(|| json!({"error": format!("cannot read {p}")}))
+                })
+                .collect();
+            element_fusion::run(&vals, &element_fusion::FusionParams { min_iou, min_conf })
+                .unwrap_or_else(|e| json!({"error": "vs_fusion_elements failed", "detail": e}))
         }
         Command::Rules { report, canvas } => rules::run(
             &report,

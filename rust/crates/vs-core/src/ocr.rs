@@ -112,6 +112,10 @@ fn dict_correct(text: &str, max_dist: usize) -> (String, f64) {
     }
 }
 
+/// 全局单例：rapidocr engine 只加载一次（det/cls/rec 三模型，避免并行竞争）。
+static OCR_ENGINE: std::sync::OnceLock<Result<std::sync::Mutex<rapidocr_core::RapidOcr>, String>> =
+    std::sync::OnceLock::new();
+
 /// 运行 OCR 传感器（对应 Python `main()` rapidocr 路径）。
 pub fn run(path: &Path, p: &OcrParams) -> Result<Value, String> {
     let img = load_rgb(path)?;
@@ -124,14 +128,21 @@ pub fn run(path: &Path, p: &OcrParams) -> Result<Value, String> {
             "模型目录不存在: {dir}（需放置 PP-OCRv6 small 模型 + dict）"
         ));
     }
-    let mut cfg = rapidocr_core::config::RapidOcrConfig::ppocr_v6_small(&dir);
-    // unclip_ratio 1.6（Python 默认）：round-join（geo-clipper）与 pyclipper 一致，
-    // 无需再像 miter 偏移那样调低。
-    if let Some(det) = cfg.det.as_mut() {
-        det.unclip_ratio = 1.6;
-    }
-    let mut engine =
-        rapidocr_core::RapidOcr::new(cfg).map_err(|e| format!("rapidocr init: {e}"))?;
+    let engine = OCR_ENGINE
+        .get_or_init(|| {
+            let mut cfg = rapidocr_core::config::RapidOcrConfig::ppocr_v6_small(&dir);
+            // unclip_ratio 1.6（Python 默认）：round-join（geo-clipper）与 pyclipper 一致，
+            // 无需再像 miter 偏移那样调低。
+            if let Some(det) = cfg.det.as_mut() {
+                det.unclip_ratio = 1.6;
+            }
+            rapidocr_core::RapidOcr::new(cfg)
+                .map_err(|e| format!("rapidocr init: {e}"))
+                .map(std::sync::Mutex::new)
+        })
+        .as_ref()
+        .map_err(|e| e.clone())?;
+    let mut engine = engine.lock().unwrap();
     let rgb = image::RgbImage::from_raw(w, h, img.data.clone()).ok_or("image decode")?;
     let out = engine
         .run_image(&rgb)

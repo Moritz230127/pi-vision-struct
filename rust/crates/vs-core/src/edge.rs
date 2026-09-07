@@ -22,6 +22,9 @@ pub struct EdgeParams {
     pub hough_threshold: u32,
     pub max_lines: u32,
     pub max_points: u32,
+    /// true = 输出 16×16 边缘密度热图（默认路径，<1K tokens）；
+    /// false = 输出原始 edge_point 元素（probe 按需调用）。
+    pub density: bool,
 }
 
 // ---------------------------------------------------------------- 高斯平滑
@@ -323,42 +326,75 @@ pub fn run(path: &Path, p: &EdgeParams) -> Result<Value, String> {
     // Hough 线段
     let lines = hough_lines(&pts, h, w, p.hough_threshold, p.max_lines);
 
-    // 边缘点元素（下采样到 ≤200 个）
+    // 边缘点元素（下采样到 ≤200 个；density 模式不输出原始点）
     let mut elements: Vec<Value> = Vec::new();
-    for (i, &(x, y)) in pts.iter().take(200).enumerate() {
-        let rx = py_round(x) as i64;
-        let ry = py_round(y) as i64;
-        elements.push(json!({
-            "id": i as i64,
-            "type": "edge_point",
-            "bbox": [rx, ry, rx + 1, ry + 1],
-            "text": Value::Null,
-            "conf": 1.0,
-            "color": Value::Null,
-            "font": Value::Null,
-            "z": Value::Null,
-            "source": ["edge"],
-            "coordsys": "image_px",
-        }));
+    if !p.density {
+        for (i, &(x, y)) in pts.iter().take(200).enumerate() {
+            let rx = py_round(x) as i64;
+            let ry = py_round(y) as i64;
+            elements.push(json!({
+                "id": i as i64,
+                "type": "edge_point",
+                "bbox": [rx, ry, rx + 1, ry + 1],
+                "text": Value::Null,
+                "conf": 1.0,
+                "color": Value::Null,
+                "font": Value::Null,
+                "z": Value::Null,
+                "source": ["edge"],
+                "coordsys": "image_px",
+            }));
+        }
     }
-    // 线段元素
-    for (i, ln) in lines.iter().enumerate() {
-        let votes = ln["votes"].as_i64().unwrap_or(0);
-        let mut el = json!({
-            "id": 200 + i as i64,
-            "type": "line_segment",
-            "bbox": [0, 0, 0, 0], // bbox 由 rho/theta 表示
-            "text": Value::Null,
-            "conf": (votes as f64 / 100.0).min(1.0),
-            "color": Value::Null,
-            "font": Value::Null,
-            "z": Value::Null,
-            "source": ["edge"],
-            "coordsys": "image_px",
+    // 线段元素（density 模式：移入 metrics 紧凑数组；非 density：完整元素）
+    let mut density_lines: Vec<Value> = Vec::new();
+    if p.density {
+        // 按 votes 降序取前 10，紧凑 [rho, theta, votes]
+        let mut sorted: Vec<&Value> = lines.iter().collect();
+        sorted.sort_by(|a, b| {
+            b["votes"]
+                .as_i64()
+                .unwrap_or(0)
+                .cmp(&a["votes"].as_i64().unwrap_or(0))
         });
-        el["line"] = ln.clone();
-        elements.push(el);
+        for ln in sorted.into_iter().take(5) {
+            density_lines.push(json!([ln["rho"], ln["theta"], ln["votes"],]));
+        }
+    } else {
+        for (i, ln) in lines.iter().enumerate() {
+            let votes = ln["votes"].as_i64().unwrap_or(0);
+            let mut el = json!({
+                "id": 200 + i as i64,
+                "type": "line_segment",
+                "bbox": [0, 0, 0, 0], // bbox 由 rho/theta 表示
+                "text": Value::Null,
+                "conf": (votes as f64 / 100.0).min(1.0),
+                "color": Value::Null,
+                "font": Value::Null,
+                "z": Value::Null,
+                "source": ["edge"],
+                "coordsys": "image_px",
+            });
+            el["line"] = ln.clone();
+            elements.push(el);
+        }
     }
+
+    // 16×16 边缘密度热图（density 模式）：每格 = 边缘点计数
+    let density_map: Vec<Vec<u32>> = if p.density {
+        const GRID: usize = 16;
+        let mut grid = vec![vec![0u32; GRID]; GRID];
+        for &(x, y) in &pts {
+            let gx = ((x / w as f64) * GRID as f64).floor() as usize;
+            let gy = ((y / h as f64) * GRID as f64).floor() as usize;
+            let gx = gx.min(GRID - 1);
+            let gy = gy.min(GRID - 1);
+            grid[gy][gx] += 1;
+        }
+        grid
+    } else {
+        Vec::new()
+    };
 
     let mut report = crate::schema::envelope(
         Some("edge"),
@@ -377,6 +413,9 @@ pub fn run(path: &Path, p: &EdgeParams) -> Result<Value, String> {
         "edge_points": pts.len(),
         "lines": lines.len(),
         "subpixel": true,
+        "density": p.density,
+        "density_map": density_map,
+        "density_lines": density_lines,
     });
     Ok(report)
 }
@@ -415,6 +454,7 @@ mod tests {
             hough_threshold: 40,
             max_lines: 50,
             max_points: 2000,
+            density: false,
         };
         let report = run(&path, &p).unwrap();
         let _ = std::fs::remove_file(&path);
@@ -433,6 +473,49 @@ mod tests {
         assert_eq!(els[62]["conf"], 0.62);
     }
 
+    /// 密度热图模式：垂直边缘 → 16×16 热图，边缘列密度 > 0，无 edge_point 元素。
+    #[test]
+    fn density_map_mode() {
+        let path = temp_path("density.png");
+        let mut gray = vec![0u8; 64 * 64];
+        for y in 0..64 {
+            for x in 32..64 {
+                gray[y * 64 + x] = 255;
+            }
+        }
+        write_png(&path, 64, 64, &gray);
+        let p = EdgeParams {
+            sigma: 1.0,
+            hough_threshold: 40,
+            max_lines: 50,
+            max_points: 2000,
+            density: true,
+        };
+        let report = run(&path, &p).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        // 无 edge_point 元素（只有线段）
+        let els = report["elements"].as_array().unwrap();
+        assert!(els.iter().all(|e| e["type"] != "edge_point"));
+        // 16×16 热图存在
+        let dm = report["metrics"]["density_map"].as_array().unwrap();
+        assert_eq!(dm.len(), 16);
+        assert_eq!(dm[0].as_array().unwrap().len(), 16);
+        // 垂直边缘在 x≈32/64*16=8 列 → 第 8 列密度 > 0
+        let col8: u32 = dm
+            .iter()
+            .map(|row| row.as_array().unwrap()[8].as_u64().unwrap() as u32)
+            .sum();
+        assert!(col8 > 0, "第 8 列应有边缘密度");
+        // 左半（x<32）密度为 0
+        let left: u32 = dm
+            .iter()
+            .flat_map(|row| row.as_array().unwrap()[..8].iter())
+            .map(|v| v.as_u64().unwrap() as u32)
+            .sum();
+        assert_eq!(left, 0, "左半无边缘");
+    }
+
     /// 全黑图 → 无边缘点、无线段。
     #[test]
     fn blank_image_no_lines() {
@@ -444,6 +527,7 @@ mod tests {
             hough_threshold: 40,
             max_lines: 50,
             max_points: 2000,
+            density: false,
         };
         let report = run(&path, &p).unwrap();
         let _ = std::fs::remove_file(&path);
@@ -469,6 +553,7 @@ mod tests {
             hough_threshold: 40,
             max_lines: 50,
             max_points: 2000,
+            density: false,
         };
         let report = run(&path, &p).unwrap();
         let _ = std::fs::remove_file(&path);

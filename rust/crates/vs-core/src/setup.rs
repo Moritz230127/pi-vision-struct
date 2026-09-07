@@ -141,7 +141,8 @@ mod tests {
 
     #[test]
     fn setup_creates_dir() {
-        // 用临时 HOME 避免污染真实目录
+        // 用临时 HOME 避免污染真实目录（保存/恢复，避免污染并行测试）
+        let orig_home = std::env::var("HOME").ok();
         let tmp = std::env::temp_dir().join("vsd_setup_test");
         let _ = std::fs::remove_dir_all(&tmp);
         std::env::set_var("HOME", &tmp);
@@ -149,5 +150,9 @@ mod tests {
         assert_eq!(r["ok"], true);
         assert!(Path::new(&tmp).join(".cache/vsensor").exists());
         let _ = std::fs::remove_dir_all(&tmp);
+        match orig_home {
+            Some(h) => std::env::set_var("HOME", h),
+            None => std::env::remove_var("HOME"),
+        }
     }
 }

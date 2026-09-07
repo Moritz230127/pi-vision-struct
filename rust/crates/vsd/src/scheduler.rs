@@ -331,9 +331,7 @@ impl Scheduler {
             });
         // 功耗模式：low-power → 所有模型 CPU 降级；battery → 大模型 CPU 降级
         let mut use_gpu = task.device == "cuda";
-        if self.power.is_low_power()
-            || (self.power.is_battery() && budget.vram_reserve >= 1.0)
-        {
+        if self.power.is_low_power() || (self.power.is_battery() && budget.vram_reserve >= 1.0) {
             use_gpu = false;
             self.stats.lock().unwrap().cpu_fallback += 1;
         }

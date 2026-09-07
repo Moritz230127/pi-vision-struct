@@ -95,7 +95,7 @@ fn ds_combine(m1: Mass, m2: Mass) -> Mass {
 }
 
 /// 顺序组合多个 mass 函数；空列表 → 全不确定。
-fn ds_combine_all(masses: &[Mass]) -> Mass {
+pub fn ds_combine_all(masses: &[Mass]) -> Mass {
     if masses.is_empty() {
         return [0.0, 0.0, 1.0];
     }

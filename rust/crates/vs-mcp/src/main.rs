@@ -408,6 +408,7 @@ impl VsToolHandler {
                 hough_threshold: 40,
                 max_lines: p.max_items.unwrap_or(50),
                 max_points: 2000,
+                density: true,
             },
         )
         .map(Json)
@@ -423,6 +424,8 @@ impl VsToolHandler {
                 cols: 64,
                 rows: 36,
                 color: false,
+                element_aware: false,
+                elements: Vec::new(),
             },
         )
         .map(Json)

@@ -131,6 +131,8 @@ fn run_sensor(script: &str, args: &HashMap<String, String>, image: &str) -> Resu
                 cols: args.get("cols").and_then(|v| v.parse().ok()).unwrap_or(64),
                 rows: args.get("rows").and_then(|v| v.parse().ok()).unwrap_or(36),
                 color: args.contains_key("color"),
+                element_aware: false,
+                elements: Vec::new(),
             },
         ),
         "vs_scene_stats.py" => crate::scene_stats::run(
@@ -158,6 +160,8 @@ fn run_sensor(script: &str, args: &HashMap<String, String>, image: &str) -> Resu
                     .get("max-points")
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(2000),
+                // 默认路径：密度热图（<1K tokens）；probe 时传 density=false 取原始点
+                density: true,
             },
         ),
         "vs_depth.py" => crate::depth::run(

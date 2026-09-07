@@ -153,17 +153,28 @@ fn iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
 }
 
 /// YOLOv9 检测：加载 ONNX → 推理 → 解码 + NMS。
+/// 全局单例：YOLOv9 icon_detect 模型只加载一次（Mutex 保护 &mut run）。
+static ICON_DETECT: std::sync::OnceLock<Result<std::sync::Mutex<ort::session::Session>, String>> =
+    std::sync::OnceLock::new();
+
 fn detect_icons(img: &crate::image::RgbImage, min_conf: f64) -> Result<Vec<DetBox>, String> {
-    let model = model_dir().join("icon_detect.onnx");
-    if !model.exists() {
-        return Err(format!(
-            "icon_detect.onnx 不存在: {model:?}（先运行 export_icon_detect_onnx.py）"
-        ));
-    }
-    let mut session = ort::session::Session::builder()
-        .map_err(|e| format!("ort builder: {e}"))?
-        .commit_from_file(&model)
-        .map_err(|e| format!("icon_detect 加载失败: {e}"))?;
+    let session = ICON_DETECT
+        .get_or_init(|| {
+            let model = model_dir().join("icon_detect.onnx");
+            if !model.exists() {
+                return Err(format!(
+                    "icon_detect.onnx 不存在: {model:?}（先运行 export_icon_detect_onnx.py）"
+                ));
+            }
+            ort::session::Session::builder()
+                .map_err(|e| format!("ort builder: {e}"))?
+                .commit_from_file(&model)
+                .map_err(|e| format!("icon_detect 加载失败: {e}"))
+                .map(std::sync::Mutex::new)
+        })
+        .as_ref()
+        .map_err(|e| e.clone())?;
+    let mut session = session.lock().unwrap();
     // 预处理：letterbox 到 640×640（与 Python `_preprocess` 一致：scale + pad 114）
     let (w, h) = (img.width as usize, img.height as usize);
     let scale = (640.0 / w as f64).min(640.0 / h as f64);
@@ -279,8 +290,9 @@ fn caption_icon(
     let n = shape.num_elements();
     let image_features: Vec<f32> = data[..n].to_vec();
     // 3) tokenize prompt（processor 把 <CAPTION> 替换为 task prompt）
+    //    plan3 E5c：语义化引导——描述图标功能而非泛泛描述
     let encoding = tokenizer
-        .encode("What does the image describe?", true)
+        .encode("Describe this icon's function in 5 words", true)
         .map_err(|e| format!("tokenize: {e}"))?;
     let ids: Vec<i64> = encoding.get_ids().iter().map(|&i| i as i64).collect();
     let ids_len = ids.len();
@@ -383,23 +395,32 @@ struct FlorenceSessions {
     decoder: std::sync::Mutex<ort::session::Session>,
 }
 
-fn load_florence() -> Result<(FlorenceSessions, tokenizers::Tokenizer), String> {
-    let dir = model_dir().join("florence2");
-    let load = |name: &str| {
-        ort::session::Session::builder()
-            .map_err(|e| format!("ort builder: {e}"))?
-            .commit_from_file(dir.join(name))
-            .map_err(|e| format!("{name} 加载失败: {e}"))
-    };
-    let sessions = FlorenceSessions {
-        vision: std::sync::Mutex::new(load("vision_encoder.onnx")?),
-        embed: std::sync::Mutex::new(load("embed_tokens.onnx")?),
-        lang: std::sync::Mutex::new(load("language_encoder.onnx")?),
-        decoder: std::sync::Mutex::new(load("decoder.onnx")?),
-    };
-    let tokenizer = tokenizers::Tokenizer::from_file(dir.join("tokenizer.json"))
-        .map_err(|e| format!("tokenizer 加载失败: {e}"))?;
-    Ok((sessions, tokenizer))
+/// 全局单例：Florence-2 模型只加载一次（~1GB，避免重复加载 + 并行竞争）。
+static FLORENCE: std::sync::OnceLock<Result<(FlorenceSessions, tokenizers::Tokenizer), String>> =
+    std::sync::OnceLock::new();
+
+fn load_florence() -> Result<&'static (FlorenceSessions, tokenizers::Tokenizer), String> {
+    FLORENCE
+        .get_or_init(|| {
+            let dir = model_dir().join("florence2");
+            let load = |name: &str| {
+                ort::session::Session::builder()
+                    .map_err(|e| format!("ort builder: {e}"))?
+                    .commit_from_file(dir.join(name))
+                    .map_err(|e| format!("{name} 加载失败: {e}"))
+            };
+            let sessions = FlorenceSessions {
+                vision: std::sync::Mutex::new(load("vision_encoder.onnx")?),
+                embed: std::sync::Mutex::new(load("embed_tokens.onnx")?),
+                lang: std::sync::Mutex::new(load("language_encoder.onnx")?),
+                decoder: std::sync::Mutex::new(load("decoder.onnx")?),
+            };
+            let tokenizer = tokenizers::Tokenizer::from_file(dir.join("tokenizer.json"))
+                .map_err(|e| format!("tokenizer 加载失败: {e}"))?;
+            Ok::<_, String>((sessions, tokenizer))
+        })
+        .as_ref()
+        .map_err(|e| e.clone())
 }
 
 // ---------------------------------------------------------------- 主流程
@@ -415,7 +436,7 @@ pub fn run(path: &Path, p: &OmniparserParams) -> Result<Value, String> {
     if !dets.is_empty() {
         let (sessions, tokenizer) = load_florence()?;
         for (i, det) in dets.iter().take(p.max_items as usize).enumerate() {
-            let caption = caption_icon(&img, &det.bbox, &tokenizer, &sessions)?;
+            let caption = caption_icon(&img, &det.bbox, tokenizer, sessions)?;
             elements.push(json!({
                 "id": i,
                 "type": "icon",

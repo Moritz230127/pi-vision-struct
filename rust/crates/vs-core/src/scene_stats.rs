@@ -470,6 +470,59 @@ fn spatial_layout(gray: &[u8], w: u32, h: u32) -> Value {
     })
 }
 
+/// 布局描述（plan3 E5b）：3×3 网格密度 → 区域判定。
+///
+/// 把图像分成 3×3 网格，计算每格平均亮度（前景密度），
+/// 按列/行/中心相对整体密度的比值判定：
+///   left_sidebar / right_sidebar / top_toolbar / bottom_statusbar / main_content / uniform。
+fn layout_summary(gray: &[u8], w: u32, h: u32) -> Value {
+    // 3×3 网格平均亮度
+    let mut density = [[0.0f64; 3]; 3];
+    for gy in 0..3 {
+        for gx in 0..3 {
+            let (x0, x1) = (gy * w / 3, (gy + 1) * w / 3);
+            let (y0, y1) = (gx * h / 3, (gx + 1) * h / 3);
+            let mut sum = 0.0f64;
+            let mut n = 0.0f64;
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    sum += f64::from(gray[(y * w + x) as usize]);
+                    n += 1.0;
+                }
+            }
+            density[gx as usize][gy as usize] = if n > 0.0 { sum / n } else { 0.0 };
+        }
+    }
+    let overall = density.iter().flatten().sum::<f64>() / 9.0;
+    let col = |c: usize| (density[0][c] + density[1][c] + density[2][c]) / 3.0;
+    let row = |r: usize| (density[r][0] + density[r][1] + density[r][2]) / 3.0;
+    let (left, right) = (col(0), col(2));
+    let (top, bottom) = (row(0), row(2));
+    let center = density[1][1];
+    let mut regions: Vec<&str> = Vec::new();
+    if overall > 0.0 {
+        if left > overall * 1.3 && left > right {
+            regions.push("left_sidebar");
+        }
+        if right > overall * 1.3 && right > left {
+            regions.push("right_sidebar");
+        }
+        if top > overall * 1.3 {
+            regions.push("top_toolbar");
+        }
+        if bottom > overall * 1.3 {
+            regions.push("bottom_statusbar");
+        }
+        if center > overall * 1.1 {
+            regions.push("main_content");
+        }
+    }
+    if regions.is_empty() {
+        regions.push("uniform");
+    }
+    json!(regions)
+}
+
 /// 运行场景统计传感器，输出 schema v3 报告（对应 Python `main()`）。
 pub fn run(path: &Path, p: &SceneStatsParams) -> Result<Value, String> {
     let img = load_rgb(path)?;
@@ -490,6 +543,7 @@ pub fn run(path: &Path, p: &SceneStatsParams) -> Result<Value, String> {
         "area": area_ratios(&gray),
         "contrast": contrast_stats(&gray),
         "spatial": spatial_layout(&gray, w, h),
+        "layout_summary": layout_summary(&gray, w, h),
         "pixel_count": w * h,
         "width": w,
         "height": h,
@@ -571,5 +625,63 @@ mod tests {
         assert_eq!(s["coverage_ratio"], 0.0);
         assert_eq!(s["center_of_mass_x"], 0.5);
         assert_eq!(s["center_of_mass_y"], 0.5);
+    }
+
+    #[test]
+    fn layout_summary_left_sidebar() {
+        // 30×30 图：左 10 列亮（左栏），其余暗（主区）
+        let mut gray = vec![0u8; 30 * 30];
+        for y in 0..30 {
+            for x in 0..10 {
+                gray[y * 30 + x] = 200;
+            }
+        }
+        let s = layout_summary(&gray, 30, 30);
+        let regions: Vec<&str> = s
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(
+            regions.contains(&"left_sidebar"),
+            "左栏应被检测: {regions:?}"
+        );
+    }
+
+    #[test]
+    fn layout_summary_top_toolbar() {
+        // 30×30 图：上 10 行亮（工具栏），其余暗
+        let mut gray = vec![0u8; 30 * 30];
+        for y in 0..10 {
+            for x in 0..30 {
+                gray[y * 30 + x] = 200;
+            }
+        }
+        let s = layout_summary(&gray, 30, 30);
+        let regions: Vec<&str> = s
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(
+            regions.contains(&"top_toolbar"),
+            "顶部工具栏应被检测: {regions:?}"
+        );
+    }
+
+    #[test]
+    fn layout_summary_uniform() {
+        // 均匀图 → uniform
+        let gray = vec![128u8; 400];
+        let s = layout_summary(&gray, 20, 20);
+        let regions: Vec<&str> = s
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(regions, vec!["uniform"]);
     }
 }

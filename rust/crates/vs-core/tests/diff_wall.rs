@@ -99,9 +99,10 @@ fn setup_check_contract() {
     assert!(!r["steps"].as_array().unwrap().is_empty());
 }
 
-/// setup：模型目录创建（临时 HOME）。
+/// setup：模型目录创建（临时 HOME，保存/恢复避免污染并行测试）。
 #[test]
 fn setup_creates_model_dir() {
+    let orig_home = std::env::var("HOME").ok();
     let tmp = std::env::temp_dir().join("vsd_setup_contract");
     let _ = std::fs::remove_dir_all(&tmp);
     std::env::set_var("HOME", &tmp);
@@ -109,4 +110,8 @@ fn setup_creates_model_dir() {
     assert_eq!(r["ok"], true);
     assert!(std::path::Path::new(&tmp).join(".cache/vsensor").exists());
     let _ = std::fs::remove_dir_all(&tmp);
+    match orig_home {
+        Some(h) => std::env::set_var("HOME", h),
+        None => std::env::remove_var("HOME"),
+    }
 }

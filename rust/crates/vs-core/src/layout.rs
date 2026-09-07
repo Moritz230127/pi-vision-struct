@@ -29,11 +29,32 @@ fn model_path() -> String {
 
 /// 标签列表（PP-DocLayoutV3 26 类，与 inference.yml label_list 一致）。
 const LABELS: [&str; 26] = [
-    "abstract", "algorithm", "aside_text", "chart", "content", "display_formula",
-    "doc_title", "figure_title", "footer", "footer_image", "footnote", "formula_number",
-    "header", "header_image", "image", "inline_formula", "number", "paragraph_title",
-    "reference", "reference_content", "seal", "table", "text", "vertical_text",
-    "vision_footnote", "unknown",
+    "abstract",
+    "algorithm",
+    "aside_text",
+    "chart",
+    "content",
+    "display_formula",
+    "doc_title",
+    "figure_title",
+    "footer",
+    "footer_image",
+    "footnote",
+    "formula_number",
+    "header",
+    "header_image",
+    "image",
+    "inline_formula",
+    "number",
+    "paragraph_title",
+    "reference",
+    "reference_content",
+    "seal",
+    "table",
+    "text",
+    "vertical_text",
+    "vision_footnote",
+    "unknown",
 ];
 
 /// 运行布局传感器（纯 Rust：ONNX 推理 + paddlex 后处理复刻）。
@@ -183,8 +204,12 @@ fn postprocess(p: PostInput) -> Vec<(String, f64, [i32; 4])> {
 
     let mut out: Vec<(String, f64, [i32; 4])> = Vec::new();
     for (orig_idx, cls, score, box_) in kept.iter() {
-        let (x_min, y_min, x_max, y_max) =
-            (box_[0] as i32, box_[1] as i32, box_[2] as i32, box_[3] as i32);
+        let (x_min, y_min, x_max, y_max) = (
+            box_[0] as i32,
+            box_[1] as i32,
+            box_[2] as i32,
+            box_[3] as i32,
+        );
         let (box_w, box_h) = (x_max - x_min, y_max - y_min);
         if box_w <= 0 || box_h <= 0 {
             continue;
@@ -207,7 +232,13 @@ fn postprocess(p: PostInput) -> Vec<(String, f64, [i32; 4])> {
             continue;
         }
         // resize mask 到 box 大小（cv2 INTER_NEAREST）
-        let resized = resize_nearest(&cropped, x_s1 - x_s0, y_s1 - y_s0, box_w as usize, box_h as usize);
+        let resized = resize_nearest(
+            &cropped,
+            x_s1 - x_s0,
+            y_s1 - y_s0,
+            box_w as usize,
+            box_h as usize,
+        );
         // mask → polygon（findContours + approxPolyDP + extract_custom_vertices）
         let polygon = mask2polygon(&resized, box_w as usize, box_h as usize, max_box_w);
         let polygon = match polygon {
@@ -226,14 +257,24 @@ fn postprocess(p: PostInput) -> Vec<(String, f64, [i32; 4])> {
             .map(|(px, py)| (px + x_min as f64, py + y_min as f64))
             .collect();
         // _normalize_layout_polygon（auto 模式：rect/quad/poly 决策）
-        let rect = [(x_min as f64, y_min as f64), (x_max as f64, y_min as f64),
-                    (x_max as f64, y_max as f64), (x_min as f64, y_max as f64)];
+        let rect = [
+            (x_min as f64, y_min as f64),
+            (x_max as f64, y_min as f64),
+            (x_max as f64, y_max as f64),
+            (x_min as f64, y_max as f64),
+        ];
         let final_poly = normalize_layout_polygon(&rect, &polygon, None);
         // bbox（restructured_boxes：clamp 到原图）
         let xs: Vec<f64> = final_poly.iter().map(|p| p.0).collect();
         let ys: Vec<f64> = final_poly.iter().map(|p| p.1).collect();
-        let (x1, y1) = (xs.iter().cloned().fold(f64::INFINITY, f64::min), ys.iter().cloned().fold(f64::INFINITY, f64::min));
-        let (x2, y2) = (xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max), ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+        let (x1, y1) = (
+            xs.iter().cloned().fold(f64::INFINITY, f64::min),
+            ys.iter().cloned().fold(f64::INFINITY, f64::min),
+        );
+        let (x2, y2) = (
+            xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+            ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+        );
         let coord = [
             (x1.max(0.0).min(img_w as f64)) as i32,
             (y1.max(0.0).min(img_h as f64)) as i32,
@@ -301,7 +342,11 @@ fn mask2polygon(mask: &[u8], w: usize, h: usize, max_box_w: f64) -> Option<Vec<(
     }
     let (contour, _) = best?;
     if std::env::var("VS_LAYOUT_DEBUG").is_ok() {
-        eprintln!("    [dbg] contour({} 点): {:?}", contour.len(), &contour[..contour.len().min(8)]);
+        eprintln!(
+            "    [dbg] contour({} 点): {:?}",
+            contour.len(),
+            &contour[..contour.len().min(8)]
+        );
     }
     // approxPolyDP（Ramer-Douglas-Peucker）
     let epsilon = 0.004 * arc_length(&contour);
@@ -356,11 +401,16 @@ fn find_external_contours(mask: &[u8], w: usize, h: usize) -> Vec<Vec<(f64, f64)
                     if mask[py as usize * w + px as usize] == 0 {
                         return false;
                     }
-                    [(0i64, 1i64), (0, -1), (1, 0), (-1, 0)].iter().any(|(dx, dy)| {
-                        let (nx, ny) = (px + dx, py + dy);
-                        nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64
-                            || mask[ny as usize * w + nx as usize] == 0
-                    })
+                    [(0i64, 1i64), (0, -1), (1, 0), (-1, 0)]
+                        .iter()
+                        .any(|(dx, dy)| {
+                            let (nx, ny) = (px + dx, py + dy);
+                            nx < 0
+                                || ny < 0
+                                || nx >= w as i64
+                                || ny >= h as i64
+                                || mask[ny as usize * w + nx as usize] == 0
+                        })
                 };
                 let boundary: Vec<(usize, usize)> = pixels
                     .iter()
@@ -379,8 +429,14 @@ fn find_external_contours(mask: &[u8], w: usize, h: usize) -> Vec<Vec<(f64, f64)
                     // 方向：0=东(1,0) 1=东北(1,-1) 2=北(0,-1) 3=西北(-1,-1)
                     //       4=西(-1,0) 5=西南(-1,1) 6=南(0,1) 7=东南(1,1)
                     let dirs = [
-                        (1i64, 0i64), (1, -1), (0, -1), (-1, -1),
-                        (-1, 0), (-1, 1), (0, 1), (1, 1),
+                        (1i64, 0i64),
+                        (1, -1),
+                        (0, -1),
+                        (-1, -1),
+                        (-1, 0),
+                        (-1, 1),
+                        (0, 1),
+                        (1, 1),
                     ];
                     let start = *boundary
                         .iter()
@@ -419,7 +475,12 @@ fn find_external_contours(mask: &[u8], w: usize, h: usize) -> Vec<Vec<(f64, f64)
                     // CHAIN_APPROX_SIMPLE：只保留方向变化的点
                     let simple = chain_approx_simple(&ordered);
                     if simple.len() >= 3 {
-                        contours.push(simple.iter().map(|&(px, py)| (px as f64, py as f64)).collect());
+                        contours.push(
+                            simple
+                                .iter()
+                                .map(|&(px, py)| (px as f64, py as f64))
+                                .collect(),
+                        );
                     }
                 }
             }
@@ -439,8 +500,14 @@ fn chain_approx_simple(points: &[(usize, usize)]) -> Vec<(usize, usize)> {
         let p_prev = points[(i + n - 1) % n];
         let p_curr = points[i];
         let p_next = points[(i + 1) % n];
-        let d1 = (p_curr.0 as i64 - p_prev.0 as i64, p_curr.1 as i64 - p_prev.1 as i64);
-        let d2 = (p_next.0 as i64 - p_curr.0 as i64, p_next.1 as i64 - p_curr.1 as i64);
+        let d1 = (
+            p_curr.0 as i64 - p_prev.0 as i64,
+            p_curr.1 as i64 - p_prev.1 as i64,
+        );
+        let d2 = (
+            p_next.0 as i64 - p_curr.0 as i64,
+            p_next.1 as i64 - p_curr.1 as i64,
+        );
         if d1 != d2 {
             out.push(p_curr);
         }
@@ -600,9 +667,7 @@ fn extract_custom_vertices(poly: &[(f64, f64)], max_allowed_dist: f64) -> Vec<(f
         let mut groups: Vec<Vec<usize>> = Vec::new();
         let mut current = vec![concave[0]];
         for i in 1..concave.len() {
-            if concave[i] - concave[i - 1] == 1
-                || (concave[i - 1] == n - 1 && concave[i] == 0)
-            {
+            if concave[i] - concave[i - 1] == 1 || (concave[i - 1] == n - 1 && concave[i] == 0) {
                 current.push(concave[i]);
             } else {
                 if current.len() >= 2 {
@@ -615,7 +680,8 @@ fn extract_custom_vertices(poly: &[(f64, f64)], max_allowed_dist: f64) -> Vec<(f
             groups.push(current);
         }
         if concave.len() >= 2 && concave[0] == 0 && concave[concave.len() - 1] == n - 1 {
-            if groups.iter().any(|g| g.contains(&0)) && groups.iter().any(|g| g.contains(&(n - 1))) {
+            if groups.iter().any(|g| g.contains(&0)) && groups.iter().any(|g| g.contains(&(n - 1)))
+            {
                 for g in &groups {
                     preserve_concave.extend(g);
                 }
@@ -779,19 +845,29 @@ fn min_area_rect(points: &[(f64, f64)]) -> Option<Vec<(f64, f64)>> {
     let cy = rect.iter().map(|p| p.1).sum::<f64>() / 4.0;
     let mut idx: Vec<usize> = (0..4).collect();
     idx.sort_by(|&a, &b| {
-        let (a1, b1) = ((rect[a].0 - cx).atan2(rect[a].1 - cy), (rect[b].0 - cx).atan2(rect[b].1 - cy));
+        let (a1, b1) = (
+            (rect[a].0 - cx).atan2(rect[a].1 - cy),
+            (rect[b].0 - cx).atan2(rect[b].1 - cy),
+        );
         a1.partial_cmp(&b1).unwrap()
     });
     let sorted: Vec<(f64, f64)> = idx.iter().map(|&i| rect[i]).collect();
     let sums: Vec<f64> = sorted.iter().map(|p| p.0 + p.1).collect();
-    let tl = sums.iter().enumerate().fold(0, |acc, (i, s)| if *s < sums[acc] { i } else { acc });
+    let tl = sums
+        .iter()
+        .enumerate()
+        .fold(0, |acc, (i, s)| if *s < sums[acc] { i } else { acc });
     Some(sorted.iter().cycle().skip(tl).take(4).cloned().collect())
 }
 
 /// 凸包（Andrew monotone chain）。
 fn convex_hull(points: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let mut pts = points.to_vec();
-    pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap().then(a.1.partial_cmp(&b.1).unwrap()));
+    pts.sort_by(|a, b| {
+        a.0.partial_cmp(&b.0)
+            .unwrap()
+            .then(a.1.partial_cmp(&b.1).unwrap())
+    });
     pts.dedup();
     if pts.len() < 3 {
         return pts;

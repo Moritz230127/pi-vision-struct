@@ -198,6 +198,8 @@ fn sensors_match_python() {
                     cols: 64,
                     rows: 36,
                     color: false,
+                    element_aware: false,
+                    elements: Vec::new(),
                 },
             )
             .unwrap(),
@@ -214,6 +216,8 @@ fn sensors_match_python() {
                     cols: 32,
                     rows: 18,
                     color: true,
+                    element_aware: false,
+                    elements: Vec::new(),
                 },
             )
             .unwrap(),
@@ -263,6 +267,7 @@ fn sensors_match_python() {
                     hough_threshold: 40,
                     max_lines: 20,
                     max_points: 2000,
+                    density: false, // 差分测试：原始 edge_point 与 golden 对比
                 },
             )
             .unwrap(),

@@ -21,25 +21,15 @@ pub struct ProtocolParams {
     pub sensor: Option<String>,
 }
 
-/// analyze：粗报告（saliency 候选 + ascii 粗栅格 + scene_stats + ocr + 融合）。
+/// analyze：粗报告（plan3 E3 分层感知——默认轻量路径）。
+///
+/// 只返回：融合元素清单（element_fusion）+ scene_stats 摘要 + edge density 热图。
+/// 不返回：原始 ocr/omniparser/detect 元素、edge_point、ascii 全栅格。
+/// 目标：总输出 < 3K tokens（两级感知预算的"粗"层）。
 fn analyze(image: &str) -> Result<Value, String> {
     let img = Path::new(image);
-    let sal = crate::saliency::run(
-        img,
-        &crate::saliency::SaliencyParams {
-            top_n: 5,
-            min_score: 0.3,
-        },
-    );
-    let ascii_r = crate::ascii::run(
-        img,
-        &crate::ascii::AsciiParams {
-            cols: 64,
-            rows: 36,
-            color: false,
-        },
-    );
-    let stats = crate::scene_stats::run(img, &crate::scene_stats::SceneStatsParams { colors: 8 });
+
+    // 1) 融合元素清单：ocr + omniparser + detect → element_fusion
     let ocr = crate::ocr::run(
         img,
         &crate::ocr::OcrParams {
@@ -47,52 +37,88 @@ fn analyze(image: &str) -> Result<Value, String> {
             min_conf: 0.5,
         },
     );
-
-    // 融合（ocr + saliency 候选）
-    let mut fusion: Option<Value> = None;
-    if let (Ok(ocr_v), Ok(sal_v)) = (&ocr, &sal) {
-        let dir = std::env::temp_dir();
-        let mut paths = Vec::new();
-        for (i, v) in [ocr_v, sal_v].iter().enumerate() {
-            let path = dir.join(format!("vs_protocol_fusion_{i}.json"));
-            let _ = std::fs::write(&path, serde_json::to_string(v).unwrap());
-            paths.push(path);
-        }
-        fusion = crate::fusion::run(&paths, None).ok();
-        for path in &paths {
-            let _ = std::fs::remove_file(path);
-        }
+    let omni = crate::omniparser::run(
+        img,
+        &crate::omniparser::OmniparserParams {
+            max_items: 30,
+            min_conf: 0.3,
+        },
+    );
+    let detect = crate::detect::run(
+        img,
+        &crate::detect::DetectParams {
+            classes: vec!["button".into(), "text".into(), "icon".into()],
+            min_conf: 0.25,
+        },
+    );
+    let mut fusion_reports: Vec<Value> = Vec::new();
+    if let Ok(v) = &ocr {
+        fusion_reports.push(v.clone());
     }
+    if let Ok(v) = &omni {
+        fusion_reports.push(v.clone());
+    }
+    if let Ok(v) = &detect {
+        fusion_reports.push(v.clone());
+    }
+    let fused = crate::element_fusion::run(
+        &fusion_reports,
+        &crate::element_fusion::FusionParams::default(),
+    );
+
+    // 2) scene_stats 摘要（metrics 精简：不含 color_histogram 大数组）
+    let stats = crate::scene_stats::run(img, &crate::scene_stats::SceneStatsParams { colors: 8 });
+    let stats_metrics = stats
+        .as_ref()
+        .map(|v| v.get("metrics").cloned().unwrap_or(json!({})))
+        .unwrap_or(json!({}));
+    let mut stats_summary = stats_metrics.clone();
+    if let Some(obj) = stats_summary.as_object_mut() {
+        obj.remove("color_histogram"); // 大数组，摘要不需要
+    }
+
+    // 3) edge density 热图（16×16，<1K tokens）
+    let edge = crate::edge::run(
+        img,
+        &crate::edge::EdgeParams {
+            sigma: 1.0,
+            hough_threshold: 40,
+            max_lines: 50,
+            max_points: 2000,
+            density: true,
+        },
+    );
+    let edge_metrics = edge
+        .as_ref()
+        .map(|v| v.get("metrics").cloned().unwrap_or(json!({})))
+        .unwrap_or(json!({}));
 
     let mut report = envelope(
         Some("analyze"),
-        &["saliency", "ascii", "scene_stats", "ocr", "fusion"],
+        &["element_fusion", "scene_stats", "edge"],
         Some("image_px"),
         Some(json!({"type": "image", "path": image})),
     );
-    report["candidates"] = sal
+    report["elements"] = fused
         .as_ref()
-        .map(|v| v.get("candidates").cloned().unwrap_or(json!([])))
+        .map(|v| v.get("elements").cloned().unwrap_or(json!([])))
         .unwrap_or(json!([]));
-    report["ascii"] = ascii_r
-        .as_ref()
-        .map(|v| v.get("ascii").cloned().unwrap_or(json!({})))
-        .unwrap_or(json!({}));
     report["metrics"] = json!({
-        "scene": stats.as_ref().map(|v| v.get("metrics").cloned().unwrap_or(json!({}))).unwrap_or(json!({})),
-        "ocr_items": ocr.as_ref().map(|v| v.get("elements").and_then(|e| e.as_array()).map(|a| a.len()).unwrap_or(0)).unwrap_or(0),
-        "saliency_candidates": report["candidates"].as_array().map(|a| a.len()).unwrap_or(0),
+        "scene": stats_summary,
+        "edge": edge_metrics,
+        "fusion": fused.as_ref().map(|v| v.get("metrics").cloned().unwrap_or(json!({}))).unwrap_or(json!({})),
     });
-    if let Some(f) = &fusion {
-        report["findings"] = f.get("findings").cloned().unwrap_or(json!([]));
-    }
     report["notation"] = json!(NOTATION_GUIDE);
-    report["note"] =
-        json!("粗报告：先用 candidates 定位有效内容，再用 zoom 放大细看，或 probe 定向取证。");
+    report["note"] = json!(
+        "粗报告（轻量）：elements 为融合元素清单（编号引用，如 click [3]）；scene 为全局统计摘要；edge 为边缘密度热图。需要精确定位时用 zoom 放大区域，或 probe 定向取证。"
+    );
     Ok(report)
 }
 
-/// zoom：细报告（region 内 ocr 高倍 + segment 前景 + edge + depth）。
+/// zoom：细报告（plan3 E3——区域 2× upscale + 局部融合元素 + ascii 局部）。
+///
+/// 流程：裁剪 region → 2× upscale → 局部 ocr/omniparser → 融合（坐标偏移回原图）
+/// + ascii 局部（区域裁剪）+ edge density + depth。
 fn zoom(image: &str, region: &str) -> Result<Value, String> {
     let coords: Vec<i64> = region
         .split(',')
@@ -102,15 +128,56 @@ fn zoom(image: &str, region: &str) -> Result<Value, String> {
         return Err(format!("invalid region: {region}"));
     }
     let (x1, y1, x2, y2) = (coords[0], coords[1], coords[2], coords[3]);
+    let (ox, oy) = (x1.min(x2), y1.min(y2));
     let img = Path::new(image);
 
+    // 1) 裁剪 + 2× upscale（LANCZOS，与 Python --upscale 2 一致）
+    let cropped = crop_to_temp(image, region)?;
+    let upscaled = upscale_temp(&cropped, 2)?;
+    let _ = std::fs::remove_file(&cropped);
+    let up_img = Path::new(&upscaled);
+
+    // 2) 局部融合元素：ocr + omniparser → element_fusion（坐标偏移回原图）
     let ocr = crate::ocr::run(
-        img,
+        up_img,
         &crate::ocr::OcrParams {
             max_items: 40,
             min_conf: 0.5,
         },
     );
+    let omni = crate::omniparser::run(
+        up_img,
+        &crate::omniparser::OmniparserParams {
+            max_items: 20,
+            min_conf: 0.3,
+        },
+    );
+    let mut fusion_reports: Vec<Value> = Vec::new();
+    if let Ok(v) = &ocr {
+        fusion_reports.push(v.clone());
+    }
+    if let Ok(v) = &omni {
+        fusion_reports.push(v.clone());
+    }
+    let fused = crate::element_fusion::run(
+        &fusion_reports,
+        &crate::element_fusion::FusionParams::default(),
+    );
+    let _ = std::fs::remove_file(&upscaled);
+
+    // 3) ascii 局部（区域裁剪，不 upscale——粗栅格即可）
+    let ascii_r = crate::ascii::run(
+        img,
+        &crate::ascii::AsciiParams {
+            cols: 32,
+            rows: 18,
+            color: false,
+            element_aware: false,
+            elements: Vec::new(),
+        },
+    );
+
+    // 4) edge density + depth（区域）
     let edge = crate::edge::run(
         img,
         &crate::edge::EdgeParams {
@@ -118,6 +185,7 @@ fn zoom(image: &str, region: &str) -> Result<Value, String> {
             hough_threshold: 40,
             max_lines: 50,
             max_points: 2000,
+            density: true,
         },
     );
     let depth = crate::depth::run(
@@ -127,54 +195,62 @@ fn zoom(image: &str, region: &str) -> Result<Value, String> {
             region: Some(region.to_string()),
         },
     );
-    let seg = crate::segment::run(
-        img,
-        &crate::segment::SegmentParams {
-            points: Vec::new(),
-            labels: Vec::new(),
-            min_area: 0.0,
-            max_instances: 10,
-        },
-    );
+
+    // 5) 融合元素坐标偏移回原图（upscale 2× → 除以 2，再加区域偏移）
+    let mut els: Vec<Value> = Vec::new();
+    if let Ok(f) = &fused {
+        if let Some(fe) = f.get("elements").and_then(|e| e.as_array()) {
+            for (i, e) in fe.iter().enumerate() {
+                let mut el = e.clone();
+                if let Some(b) = el.get_mut("bbox").and_then(|b| b.as_array_mut()) {
+                    if b.len() >= 4 {
+                        b[0] = json!(b[0].as_f64().unwrap_or(0.0) / 2.0 + ox as f64);
+                        b[1] = json!(b[1].as_f64().unwrap_or(0.0) / 2.0 + oy as f64);
+                        b[2] = json!(b[2].as_f64().unwrap_or(0.0) / 2.0 + ox as f64);
+                        b[3] = json!(b[3].as_f64().unwrap_or(0.0) / 2.0 + oy as f64);
+                    }
+                }
+                if let Some(c) = el.get_mut("center").and_then(|c| c.as_array_mut()) {
+                    if c.len() >= 2 {
+                        c[0] = json!(c[0].as_f64().unwrap_or(0.0) / 2.0 + ox as f64);
+                        c[1] = json!(c[1].as_f64().unwrap_or(0.0) / 2.0 + oy as f64);
+                    }
+                }
+                el["id"] = json!(i);
+                els.push(el);
+            }
+        }
+    }
 
     let mut report = envelope(
         Some("zoom"),
-        &["ocr", "edge", "depth", "segment"],
+        &["element_fusion", "ascii", "edge", "depth"],
         Some("image_px"),
         Some(json!({
             "type": "image",
             "path": image,
             "region": [x1, y1, x2, y2],
+            "upscale": 2,
         })),
     );
-    let mut els: Vec<Value> = Vec::new();
-    if let Ok(o) = &ocr {
-        if let Some(e) = o.get("elements").and_then(|v| v.as_array()) {
-            els.extend(e.iter().cloned());
-        }
-    }
-    if let Ok(e) = &edge {
-        if let Some(es) = e.get("elements").and_then(|v| v.as_array()) {
-            els.extend(es.iter().cloned());
-        }
-    }
     report["elements"] = json!(els);
-    report["foreground"] = seg
+    report["ascii"] = ascii_r
         .as_ref()
-        .map(|v| v.get("foreground").cloned().unwrap_or(Value::Null))
-        .unwrap_or(Value::Null);
+        .map(|v| v.get("ascii").cloned().unwrap_or(json!({})))
+        .unwrap_or(json!({}));
     report["depth"] = depth
         .as_ref()
         .map(|v| v.get("depth").cloned().unwrap_or(json!({})))
         .unwrap_or(json!({}));
     report["metrics"] = json!({
-        "ocr_items": ocr.as_ref().map(|v| v.get("elements").and_then(|e| e.as_array()).map(|a| a.len()).unwrap_or(0)).unwrap_or(0),
-        "edge_points": edge.as_ref().map(|v| v.get("metrics").and_then(|m| m.get("edge_points")).and_then(|p| p.as_u64()).unwrap_or(0)).unwrap_or(0),
         "region": [x1, y1, x2, y2],
+        "upscale": 2,
+        "fused_elements": els.len(),
+        "edge": edge.as_ref().map(|v| v.get("metrics").cloned().unwrap_or(json!({}))).unwrap_or(json!({})),
     });
     report["notation"] = json!(NOTATION_GUIDE);
     report["note"] = json!(
-        "细报告：region 内 OCR 已 2× 放大；edge 给出亚像素边缘；depth 给出区域深度；foreground 给出前景分割。"
+        "细报告：region 已 2× 放大后融合（elements 坐标已偏移回原图）；ascii 为区域局部栅格；edge 为密度热图；depth 为区域深度。"
     );
     Ok(report)
 }
@@ -200,6 +276,16 @@ fn crop_to_temp(image: &str, region: &str) -> Result<String, String> {
     let cropped = image::imageops::crop_imm(&img, x, y, w, h).to_image();
     let tmp = std::env::temp_dir().join(format!("vs_protocol_crop_{}.png", std::process::id()));
     cropped.save(&tmp).map_err(|e| format!("save crop: {e}"))?;
+    Ok(tmp.to_string_lossy().into_owned())
+}
+
+/// 图像 2× upscale（LANCZOS，与 Python `--upscale 2` 一致）。
+fn upscale_temp(image: &str, factor: u32) -> Result<String, String> {
+    let img = image::open(image).map_err(|e| format!("open {image}: {e}"))?;
+    let (w, h) = (img.width() * factor, img.height() * factor);
+    let up = image::imageops::resize(&img, w, h, image::imageops::FilterType::Lanczos3);
+    let tmp = std::env::temp_dir().join(format!("vs_protocol_up_{}.png", std::process::id()));
+    up.save(&tmp).map_err(|e| format!("save upscale: {e}"))?;
     Ok(tmp.to_string_lossy().into_owned())
 }
 
@@ -262,6 +348,7 @@ fn probe(image: &str, bbox: &str, sensor: &str) -> Result<Value, String> {
                 hough_threshold: 40,
                 max_lines: 50,
                 max_points: 2000,
+                density: false, // probe 按需：原始 edge_point
             },
         ),
         "depth" => crate::depth::run(
@@ -399,5 +486,75 @@ mod tests {
             sensor: None,
         };
         assert!(run(&p).is_err());
+    }
+
+    #[test]
+    fn analyze_lightweight_no_ascii_grid() {
+        // E3 门禁：analyze 不返回 ascii 全栅格、不返回原始 ocr 元素
+        let img = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../bench/samples/s03_alignment.png"
+        );
+        let p = ProtocolParams {
+            action: "analyze".into(),
+            image: img.into(),
+            region: None,
+            bbox: None,
+            sensor: None,
+        };
+        let r = run(&p).unwrap();
+        assert!(r.get("ascii").is_none(), "analyze 不应返回 ascii 全栅格");
+        assert!(
+            r.get("candidates")
+                .and_then(|c| c.as_array())
+                .map(|a| a.is_empty())
+                .unwrap_or(false),
+            "analyze 不应返回 saliency candidates（应为空）"
+        );
+        // 融合元素清单存在
+        let els = r["elements"].as_array().unwrap();
+        assert!(!els.is_empty(), "analyze 应返回融合元素清单");
+        // 每元素带编号 + 溯源
+        for e in els {
+            assert!(e.get("id").is_some(), "元素应带编号");
+            assert!(e.get("sources").is_some(), "元素应带溯源");
+        }
+        // 输出大小 < 3K tokens（≈ 12KB）
+        let size = serde_json::to_string(&r).unwrap().len();
+        assert!(
+            size < 12_000,
+            "analyze 输出应 < 3K tokens，实际 {size} bytes"
+        );
+    }
+
+    #[test]
+    fn zoom_upscale_and_coord_offset() {
+        // E3 门禁：zoom 区域 2× upscale + 坐标偏移回原图
+        let img = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../bench/samples/s03_alignment.png"
+        );
+        let p = ProtocolParams {
+            action: "zoom".into(),
+            image: img.into(),
+            region: Some("100,80,300,200".into()),
+            bbox: None,
+            sensor: None,
+        };
+        let r = run(&p).unwrap();
+        assert_eq!(r["source"]["upscale"], 2, "zoom 应 2× upscale");
+        // 融合元素坐标应在原图空间（x ≥ 100, y ≥ 80）
+        if let Some(els) = r["elements"].as_array() {
+            for e in els {
+                if let Some(b) = e.get("bbox").and_then(|b| b.as_array()) {
+                    let x = b[0].as_f64().unwrap();
+                    let y = b[1].as_f64().unwrap();
+                    assert!(x >= 100.0, "bbox x 应偏移回原图: {x}");
+                    assert!(y >= 80.0, "bbox y 应偏移回原图: {y}");
+                }
+            }
+        }
+        // ascii 局部存在
+        assert!(r.get("ascii").is_some(), "zoom 应返回 ascii 局部");
     }
 }
