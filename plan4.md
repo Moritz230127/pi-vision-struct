@@ -126,7 +126,8 @@ pi-version-and-gui/                    # npm 包根（= 扩展根）
 
 ### 4.2 安装流程
 
-`pi install npm:pi-version-and-gui` → npm 装 TS 壳（<1MB）→ postinstall 从 GitHub Releases 下载 3 个二进制（~60MB 压缩）→ 模型按需下载（~/.cache/vsensor，~2GB）。
+`pi install npm:pi-version-and-gui` → npm 装 TS 壳（<1MB）→ postinstall 从 GitHub
+Releases 下载 3 个二进制（~60MB 压缩）→ 模型按需下载（~/.cache/vsensor，~2GB）。
 
 ### 4.3 布局决策
 
