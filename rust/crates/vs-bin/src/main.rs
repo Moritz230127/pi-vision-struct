@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use serde_json::json;
 use vs_core::{
-    ascii, audit, depth, edge, fusion, geometry, ocr, pix, rules, saliency, scene_stats, segment,
+    a11y, ascii, audit, blend, capture, depth, detect, dom, edge, fusion, geometry, layout, ocr,
+    omniparser, pdf, pix, pptx, rules, saliency, scene_stats, segment,
 };
 
 /// 数理化视觉套件 V4（全面 Rust 重写）。
@@ -139,6 +140,76 @@ enum Command {
         #[arg(long, default_value_t = 0.5)]
         min_conf: f64,
     },
+    /// 截屏（xcap，Wayland screencopy）。
+    Capture {
+        /// 区域 x1,y1,x2,y2
+        #[arg(long)]
+        region: Option<String>,
+        /// 输出 PNG 路径
+        #[arg(long, default_value = "/tmp/vs_capture.png")]
+        out: String,
+    },
+    /// DOM 提取（chromiumoxide 驱动 headless Chrome）。
+    Dom {
+        #[arg(long)]
+        url: String,
+        #[arg(long, default_value_t = 60)]
+        max_elements: u32,
+    },
+    /// 无障碍树（atspi）。
+    A11y {
+        #[arg(long)]
+        app: Option<String>,
+        #[arg(long, default_value_t = 80)]
+        max_items: u32,
+    },
+    /// PDF 解析（pdfium-render）。
+    Pdf {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        pages: Option<String>,
+    },
+    /// PPTX 解析（OOXML 自研）。
+    Pptx {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        slide: Option<u32>,
+    },
+    /// .blend 解析（blend-rs）。
+    Blend {
+        #[arg(long)]
+        file: PathBuf,
+    },
+    /// OmniParser（YOLOv9 + Florence-2）。
+    Omniparser {
+        #[arg(long)]
+        image: PathBuf,
+        #[arg(long, default_value_t = 100)]
+        max_items: u32,
+        #[arg(long, default_value_t = 0.3)]
+        min_conf: f64,
+    },
+    /// 版式分析（PP-DocLayoutV3，Python 回退）。
+    Layout {
+        #[arg(long)]
+        image: PathBuf,
+        #[arg(long, default_value_t = 100)]
+        max_items: u32,
+        #[arg(long, default_value_t = 0.5)]
+        min_conf: f64,
+    },
+    /// 开放词表检测（OWLv2）。
+    Detect {
+        #[arg(long)]
+        image: PathBuf,
+        /// 逗号分隔类别
+        #[arg(long, default_value = "button,text")]
+        classes: String,
+        #[arg(long, default_value_t = 0.25)]
+        min_conf: f64,
+    },
 }
 
 fn main() {
@@ -254,6 +325,76 @@ fn main() {
             },
         )
         .unwrap_or_else(|e| json!({"error": "vs_ocr failed", "detail": e})),
+        Command::Capture { region, out } => capture::run(&capture::CaptureParams {
+            region: region.as_deref().and_then(|s| {
+                let p: Vec<u32> = s.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+                (p.len() == 4).then(|| [p[0], p[1], p[2], p[3]])
+            }),
+            out,
+        })
+        .unwrap_or_else(|e| json!({"error": "vs_capture failed", "detail": e})),
+        Command::Dom { url, max_elements } => dom::run(&dom::DomParams {
+            url,
+            max_elements,
+            timeout_ms: 60_000,
+        })
+        .unwrap_or_else(|e| json!({"error": "vs_dom failed", "detail": e})),
+        Command::A11y { app, max_items } => a11y::run(&a11y::A11yParams { app, max_items })
+            .unwrap_or_else(|e| json!({"error": "vs_a11y failed", "detail": e})),
+        Command::Pdf { file, pages } => pdf::run(&pdf::PdfParams {
+            file: file.to_string_lossy().into_owned(),
+            pages,
+        })
+        .unwrap_or_else(|e| json!({"error": "vs_pdf failed", "detail": e})),
+        Command::Pptx { file, slide } => pptx::run(&pptx::PptxParams {
+            file: file.to_string_lossy().into_owned(),
+            slide,
+        })
+        .unwrap_or_else(|e| json!({"error": "vs_pptx failed", "detail": e})),
+        Command::Blend { file } => blend::run(&blend::BlendParams {
+            file: file.to_string_lossy().into_owned(),
+        })
+        .unwrap_or_else(|e| json!({"error": "vs_blend failed", "detail": e})),
+        Command::Omniparser {
+            image,
+            max_items,
+            min_conf,
+        } => omniparser::run(
+            &image,
+            &omniparser::OmniparserParams {
+                max_items,
+                min_conf,
+            },
+        )
+        .unwrap_or_else(|e| json!({"error": "vs_omniparser failed", "detail": e})),
+        Command::Layout {
+            image,
+            max_items,
+            min_conf,
+        } => layout::run(
+            &image,
+            &layout::LayoutParams {
+                max_items,
+                min_conf,
+            },
+        )
+        .unwrap_or_else(|e| json!({"error": "vs_layout failed", "detail": e})),
+        Command::Detect {
+            image,
+            classes,
+            min_conf,
+        } => detect::run(
+            &image,
+            &detect::DetectParams {
+                classes: classes
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
+                min_conf,
+            },
+        )
+        .unwrap_or_else(|e| json!({"error": "vs_detect failed", "detail": e})),
     };
     println!("{}", serde_json::to_string_pretty(&out).unwrap());
 }

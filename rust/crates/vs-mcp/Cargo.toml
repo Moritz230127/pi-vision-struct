@@ -1,0 +1,14 @@
+[package]
+name = "vs-mcp"
+version = "0.1.0"
+edition = "2021"
+description = "pi-vision-struct MCP server（Rust，替代 server.mcp.ts）"
+
+[dependencies]
+vs-core = { path = "../vs-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+rmcp = { version = "3.2.0", features = ["transport-io"] }
+schemars = "1"
+anyhow = "1"

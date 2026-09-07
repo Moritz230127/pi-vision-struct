@@ -7,7 +7,9 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/s7").join(name)
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/s7")
+        .join(name)
 }
 
 fn load_golden(name: &str) -> Value {
@@ -28,7 +30,10 @@ fn pdf_matches_python() {
     // 结构
     assert_eq!(out["task"], "pdf");
     assert_eq!(out["source"]["pages"], golden["source"]["pages"]);
-    assert_eq!(out["metrics"]["page_count"], golden["metrics"]["page_count"]);
+    assert_eq!(
+        out["metrics"]["page_count"],
+        golden["metrics"]["page_count"]
+    );
 
     // 元素数一致
     let g_els = golden["elements"].as_array().unwrap();
@@ -43,7 +48,12 @@ fn pdf_matches_python() {
         let gb = g["bbox"].as_array().unwrap();
         for k in 0..4 {
             let diff = (rb[k].as_f64().unwrap() - gb[k].as_f64().unwrap()).abs();
-            assert!(diff <= 5.0, "bbox[{k}] 容差 ±5pt: rust={} golden={}", rb[k], gb[k]);
+            assert!(
+                diff <= 5.0,
+                "bbox[{k}] 容差 ±5pt: rust={} golden={}",
+                rb[k],
+                gb[k]
+            );
         }
     }
 }
@@ -58,8 +68,14 @@ fn pptx_matches_python() {
     })
     .expect("pptx run 失败");
 
-    assert_eq!(out["source"]["total_slides"], golden["source"]["total_slides"]);
-    assert_eq!(out["source"]["slide_size_pt"], golden["source"]["slide_size_pt"]);
+    assert_eq!(
+        out["source"]["total_slides"],
+        golden["source"]["total_slides"]
+    );
+    assert_eq!(
+        out["source"]["slide_size_pt"],
+        golden["source"]["slide_size_pt"]
+    );
 
     let g_slides = golden["slides"].as_array().unwrap();
     let r_slides = out["slides"].as_array().unwrap();
@@ -89,8 +105,14 @@ fn blend_matches_python() {
         .expect("blend run 失败");
 
     // metrics
-    assert_eq!(out["metrics"]["object_count"], golden["metrics"]["object_count"]);
-    assert_eq!(out["metrics"]["total_tris"], golden["metrics"]["total_tris"]);
+    assert_eq!(
+        out["metrics"]["object_count"],
+        golden["metrics"]["object_count"]
+    );
+    assert_eq!(
+        out["metrics"]["total_tris"],
+        golden["metrics"]["total_tris"]
+    );
 
     // 对象逐字段（按名称匹配，不依赖顺序——scene.objects 顺序与文件存储序不同）
     let g_objs = golden["objects3d"].as_array().unwrap();
@@ -113,7 +135,12 @@ fn blend_matches_python() {
             let gv = gc.as_array().unwrap();
             for k in 0..3 {
                 let diff = (rv[k].as_f64().unwrap() - gv[k].as_f64().unwrap()).abs();
-                assert!(diff <= 0.01, "bbox3d[{k}] 容差 0.01: rust={} golden={}", rv[k], gv[k]);
+                assert!(
+                    diff <= 0.01,
+                    "bbox3d[{k}] 容差 0.01: rust={} golden={}",
+                    rv[k],
+                    gv[k]
+                );
             }
         }
         // matrix_world 容差
