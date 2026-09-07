@@ -10,8 +10,8 @@ use clap::{Parser, Subcommand};
 use serde_json::json;
 use vs_core::{
     a11y, analyze, ascii, audit, audit3d, blend, capture, cluster, depth, detect, dom, edge,
-    element_fusion, fusion, geometry, layout, ocr, omniparser, pdf, pix, pptx, protocol, rules,
-    saliency, scene_stats, segment, setup, wall,
+    element_fusion, fusion, geometry, gui, layout, ocr, omniparser, pdf, pix, pptx, protocol,
+    rules, saliency, scene_stats, segment, setup, wall,
 };
 
 /// 数理化视觉套件 V4（全面 Rust 重写）。
@@ -268,7 +268,7 @@ enum Command {
         #[arg(long, default_value_t = 1.0)]
         dpr: f64,
     },
-    /// 多轮反馈协议：analyze / zoom / probe。
+    /// 多轮反馈协议：analyze / zoom / probe / click [N]。
     Protocol {
         #[arg(long)]
         action: String,
@@ -280,9 +280,44 @@ enum Command {
         bbox: Option<String>,
         #[arg(long)]
         sensor: Option<String>,
-        /// probe 确认模式：对指定融合元素 id 重新检测（E6 确定性锚点）。
+        /// probe 确认模式 / click 编号引用：对指定融合元素 id 操作（E6/G1）。
         #[arg(long)]
         confirm: Option<String>,
+    },
+    /// GUI 行动层（plan4 G1）：click/type/key/drag/scroll/focus（wlrctl serve）。
+    Gui {
+        #[arg(long)]
+        action: String,
+        /// 元素编号（click_element 用，五级降级链入口）。
+        #[arg(long)]
+        element_id: Option<usize>,
+        #[arg(long)]
+        x: Option<f64>,
+        #[arg(long)]
+        y: Option<f64>,
+        #[arg(long)]
+        text: Option<String>,
+        #[arg(long)]
+        combo: Option<String>,
+        #[arg(long, default_value = "left")]
+        button: String,
+        #[arg(long)]
+        x1: Option<f64>,
+        #[arg(long)]
+        y1: Option<f64>,
+        #[arg(long)]
+        x2: Option<f64>,
+        #[arg(long)]
+        y2: Option<f64>,
+        #[arg(long)]
+        dy: Option<f64>,
+        #[arg(long)]
+        dx: Option<f64>,
+        #[arg(long)]
+        window: Option<String>,
+        /// 点击验证（verify_click 闭环）。
+        #[arg(long)]
+        verify: bool,
     },
     /// 三维装配审计（OBB-SAT + kd-tree 点云距离）。
     Audit3d {
@@ -580,6 +615,40 @@ fn main() {
             confirm,
         })
         .unwrap_or_else(|e| json!({"error": "vs_protocol failed", "detail": e})),
+        Command::Gui {
+            action,
+            element_id,
+            x,
+            y,
+            text,
+            combo,
+            button,
+            x1,
+            y1,
+            x2,
+            y2,
+            dy,
+            dx,
+            window,
+            verify,
+        } => gui::run(&gui::GuiParams {
+            action,
+            element_id,
+            x,
+            y,
+            text,
+            combo,
+            button: Some(button),
+            x1,
+            y1,
+            x2,
+            y2,
+            dy,
+            dx,
+            window,
+            verify,
+        })
+        .unwrap_or_else(|e| json!({"error": "vs_gui failed", "detail": e})),
         Command::Audit3d {
             report,
             gap_threshold,

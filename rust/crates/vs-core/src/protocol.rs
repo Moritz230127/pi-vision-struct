@@ -584,6 +584,39 @@ pub fn run(p: &ProtocolParams) -> Result<Value, String> {
                 .ok_or_else(|| "probe 需要 --sensor ocr|edge|depth|segment|pix".to_string())?;
             probe(&p.image, &bbox, &sensor)
         }
+        "click" => {
+            // plan4 G1：click [N] 编号引用 → 五级降级链（a11y → element → vision → global）
+            let id: usize = p
+                .confirm
+                .clone()
+                .ok_or_else(|| "click 需要 --confirm <元素编号>（如 click [3]）".to_string())?
+                .trim()
+                .parse()
+                .map_err(|e| format!("click 需要整数元素编号: {e}"))?;
+            // 先 analyze 得到融合元素清单 → 取元素 bbox center 作为 vision_click 兜底
+            let base = analyze(&p.image)?;
+            let fallback: Option<(f64, f64)> = base
+                .get("elements")
+                .and_then(|e| e.as_array())
+                .and_then(|els| els.get(id))
+                .and_then(|e| e.get("center"))
+                .and_then(|c| c.as_array())
+                .and_then(|c| {
+                    if c.len() >= 2 {
+                        Some((c[0].as_f64().unwrap_or(0.0), c[1].as_f64().unwrap_or(0.0)))
+                    } else {
+                        None
+                    }
+                });
+            let r = crate::gui::click_element(id, fallback)?;
+            // 闭环：返回元素信息 + 点击结果
+            let mut out = r.clone();
+            out["element_id"] = json!(id);
+            if let Some((x, y)) = fallback {
+                out["element_center"] = json!([x, y]);
+            }
+            Ok(out)
+        }
         other => Err(format!("unknown action: {other}")),
     }
 }

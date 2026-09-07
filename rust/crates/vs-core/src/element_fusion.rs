@@ -320,6 +320,49 @@ pub fn run(reports: &[Value], p: &FusionParams) -> Result<Value, String> {
     Ok(report)
 }
 
+/// 将 a11y 元素并入融合元素清单（plan4 G1：统一编号）。
+///
+/// 融合元素（image_px 坐标）与 a11y 元素（screen_px 坐标）合并编号：
+/// 融合元素在前 [0]..[N-1]，a11y 元素在后 [N]..[N+M-1]。
+/// 每元素带 `source_kind`（"vision" / "a11y"）供行动层选择降级链入口。
+///
+/// 坐标空间：a11y 元素为屏幕坐标（screen_px），融合元素为图像坐标（image_px）——
+/// 调用方需保证两者在同一坐标空间（capture 全屏时一致）。
+pub fn merge_a11y(fusion_report: &Value, a11y_report: &Value) -> Result<Value, String> {
+    let mut out = fusion_report.clone();
+    let mut els: Vec<Value> = out
+        .get("elements")
+        .and_then(|e| e.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let base = els.len();
+    if let Some(a11y_els) = a11y_report.get("elements").and_then(|e| e.as_array()) {
+        for (i, e) in a11y_els.iter().enumerate() {
+            let mut el = e.clone();
+            el["id"] = json!(base + i);
+            el["source_kind"] = json!("a11y");
+            // 保留 a11y 角色/名称，供行动层 DoAction 使用
+            if el.get("type").is_none() {
+                el["type"] = json!("a11y_element");
+            }
+            els.push(el);
+        }
+    }
+    // 融合元素标记 source_kind = "vision"
+    for e in els.iter_mut().take(base) {
+        if e.get("source_kind").is_none() {
+            e["source_kind"] = json!("vision");
+        }
+    }
+    out["elements"] = json!(els);
+    out["metrics"] = json!({
+        "vision_elements": base,
+        "a11y_elements": els.len() - base,
+        "total_elements": els.len(),
+    });
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -455,5 +498,40 @@ mod tests {
         let e = &out["elements"].as_array().unwrap()[0];
         let a = e["assertion"].as_str().unwrap();
         assert!(a.contains("推测"), "conf 0.5 应为推测: {a}");
+    }
+
+    #[test]
+    fn merge_a11y_unified_numbering() {
+        // plan4 G1：融合元素 + a11y 元素统一编号
+        let ocr = ocr_report(vec![json!({
+            "bbox": [100.0, 100.0, 200.0, 150.0],
+            "text": "btn1", "conf": 0.9, "type": "text",
+        })]);
+        let fused = run(&[ocr], &FusionParams::default()).unwrap();
+        let a11y = json!({
+            "schema": "vision-report/v3",
+            "sensors": ["a11y"],
+            "coordsys": "screen_px",
+            "elements": [
+                {"id": 0, "type": "push_button", "text": "OK", "bbox": [10, 10, 50, 30]},
+                {"id": 1, "type": "text", "text": "label", "bbox": [10, 40, 80, 60]},
+            ],
+        });
+        let merged = merge_a11y(&fused, &a11y).unwrap();
+        let els = merged["elements"].as_array().unwrap();
+        assert_eq!(els.len(), 3, "1 融合 + 2 a11y = 3");
+        // 融合元素在前，编号 0，source_kind = vision
+        assert_eq!(els[0]["id"], 0);
+        assert_eq!(els[0]["source_kind"], "vision");
+        // a11y 元素在后，编号 1,2，source_kind = a11y
+        assert_eq!(els[1]["id"], 1);
+        assert_eq!(els[1]["source_kind"], "a11y");
+        assert_eq!(els[1]["text"], "OK");
+        assert_eq!(els[2]["id"], 2);
+        assert_eq!(els[2]["source_kind"], "a11y");
+        // metrics
+        assert_eq!(merged["metrics"]["vision_elements"], 1);
+        assert_eq!(merged["metrics"]["a11y_elements"], 2);
+        assert_eq!(merged["metrics"]["total_elements"], 3);
     }
 }

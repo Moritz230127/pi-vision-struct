@@ -25,7 +25,7 @@ const MAX_DEPTH: u32 = 14;
 ///
 /// Firefox 等应用的 Component 接口注册不稳定（首次调用可能 UnknownMethod），
 /// 故重试 3 次（间隔 100ms）。
-async fn get_extents_zbus(
+pub(crate) async fn get_extents_zbus(
     obj_ref: &atspi::proxy::common::object_ref::ObjectRefOwned,
     conn: &zbus::Connection,
 ) -> Result<(i32, i32, i32, i32), String> {
@@ -50,6 +50,67 @@ async fn get_extents_zbus(
         }
     }
     Err(last_err)
+}
+
+/// 通过 zbus 直接调用 AT-SPI `DoAction`（org.a11y.atspi.Action 接口）。
+///
+/// 五级降级链第 1 级（a11y_action）：对无障碍元素执行动作（如 "click"），
+/// 零坐标误差（Codex accessibility 动作直达同款）。
+/// 返回 Ok(true) 表示动作执行成功。
+///
+/// `action_index`：动作索引（0 = 默认动作，通常为 "click"）。
+pub async fn do_action_zbus(
+    obj_ref: &atspi::proxy::common::object_ref::ObjectRefOwned,
+    conn: &zbus::Connection,
+    action_index: i32,
+) -> Result<bool, String> {
+    let name = obj_ref.name().ok_or("no bus name")?;
+    let path = obj_ref.path();
+    let proxy = zbus::Proxy::new(conn, name.clone(), path.clone(), "org.a11y.atspi.Action")
+        .await
+        .map_err(|e| format!("zbus Action proxy: {e}"))?;
+    let mut last_err = String::new();
+    for _ in 0..3 {
+        match proxy.call_method("DoAction", &action_index).await {
+            Ok(reply) => {
+                return reply
+                    .body()
+                    .deserialize::<bool>()
+                    .map_err(|e| format!("deserialize DoAction: {e}"));
+            }
+            Err(e) => {
+                last_err = format!("DoAction: {e}");
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
+    }
+    Err(last_err)
+}
+
+/// 查询元素的可用动作列表（org.a11y.atspi.Action 接口 `GetActions`）。
+///
+/// 返回动作名列表（如 ["click", "press"]）。空列表 = 元素无动作（降级到坐标点击）。
+pub async fn get_actions_zbus(
+    obj_ref: &atspi::proxy::common::object_ref::ObjectRefOwned,
+    conn: &zbus::Connection,
+) -> Result<Vec<String>, String> {
+    use atspi::proxy::action::ActionProxy;
+    let name: zbus::names::BusName = obj_ref.name().ok_or("no bus name")?.clone().into();
+    let path = obj_ref.path();
+    let proxy = ActionProxy::builder(conn)
+        .destination(name)
+        .map_err(|e| format!("ActionProxy destination: {e}"))?
+        .path(path)
+        .map_err(|e| format!("ActionProxy path: {e}"))?
+        .cache_properties(zbus::proxy::CacheProperties::No)
+        .build()
+        .await
+        .map_err(|e| format!("ActionProxy build: {e}"))?;
+    let actions = proxy
+        .get_actions()
+        .await
+        .map_err(|e| format!("GetActions: {e}"))?;
+    Ok(actions.into_iter().map(|a| a.name).collect())
 }
 
 /// 读取 AT-SPI 无障碍树 → schema v3 envelope。

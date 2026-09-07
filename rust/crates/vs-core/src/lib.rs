@@ -26,6 +26,7 @@ pub mod edge;
 pub mod element_fusion;
 pub mod fusion;
 pub mod geometry;
+pub mod gui;
 pub mod hit_test;
 pub mod image;
 pub mod layout;
