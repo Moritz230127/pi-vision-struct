@@ -25,6 +25,7 @@ pub fn run(path: &Path, p: &LayoutParams) -> Result<Value, String> {
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
+        .join("..")
         .join("python")
         .join("vs_layout.py");
     let out = std::process::Command::new(&pybin)
