@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use serde_json::json;
 use vs_core::{
-    a11y, ascii, audit, blend, capture, depth, detect, dom, edge, fusion, geometry, layout, ocr,
-    omniparser, pdf, pix, pptx, rules, saliency, scene_stats, segment, setup, wall,
+    a11y, ascii, audit, blend, capture, cluster, depth, detect, dom, edge, fusion, geometry,
+    layout, ocr, omniparser, pdf, pix, pptx, rules, saliency, scene_stats, segment, setup, wall,
 };
 
 /// 数理化视觉套件 V4（全面 Rust 重写）。
@@ -181,6 +181,17 @@ enum Command {
     Blend {
         #[arg(long)]
         file: PathBuf,
+    },
+    /// CLIP 离线聚类（open_clip ViT-B-32 ONNX）。
+    Cluster {
+        #[arg(long)]
+        dir: Option<String>,
+        #[arg(long)]
+        files: Option<String>,
+        #[arg(long, default_value_t = 0.75)]
+        threshold: f64,
+        #[arg(long, default_value_t = 200)]
+        max_files: usize,
     },
     /// OmniParser（YOLOv9 + Florence-2）。
     Omniparser {
@@ -368,6 +379,19 @@ fn main() {
             file: file.to_string_lossy().into_owned(),
         })
         .unwrap_or_else(|e| json!({"error": "vs_blend failed", "detail": e})),
+        Command::Cluster {
+            dir,
+            files,
+            threshold,
+            max_files,
+        } => cluster::run(&cluster::ClusterParams {
+            dir: dir.clone(),
+            files: files.clone(),
+            threshold,
+            max_files,
+            ..Default::default()
+        })
+        .unwrap_or_else(|e| json!({"error": "vs_cluster failed", "detail": e})),
         Command::Omniparser {
             image,
             max_items,

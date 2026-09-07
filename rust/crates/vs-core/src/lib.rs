@@ -15,6 +15,7 @@ pub mod audit;
 pub mod bbox;
 pub mod blend;
 pub mod capture;
+pub mod cluster;
 pub mod color;
 pub mod depth;
 pub mod detect;
