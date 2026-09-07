@@ -595,8 +595,9 @@ mod tests {
                 unclip_ratio: 1.6,
                 min_size: 3,
             });
+            // fixture dest_shape 是 [h, w]；process 期望 (dest_w, dest_h)
             let actual = processor
-                .process(pred, expected.dest_shape[0], expected.dest_shape[1])
+                .process(pred, expected.dest_shape[1], expected.dest_shape[0])
                 .unwrap();
 
             let pairs = match_by_nearest_center(&actual, &expected.boxes);
