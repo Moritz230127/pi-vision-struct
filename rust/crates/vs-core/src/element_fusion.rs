@@ -286,6 +286,13 @@ pub fn run(reports: &[Value], p: &FusionParams) -> Result<Value, String> {
         .map(|(i, e)| {
             let cx = ((e.bbox[0] + e.bbox[2]) / 2.0).round() as i64;
             let cy = ((e.bbox[1] + e.bbox[3]) / 2.0).round() as i64;
+            let conf = (e.conf * 1000.0).round() / 1000.0;
+            // 存在性断言（plan3 E6）：conf ≥ 0.7 为"已确认"，否则"推测"
+            let status = if conf >= 0.7 { "已确认" } else { "推测" };
+            let assertion = format!(
+                "此元素由 {} 检测，conf {conf}（{status}）",
+                e.sources.join(" + ")
+            );
             json!({
                 "id": i,
                 "bbox": e.bbox,
@@ -294,7 +301,8 @@ pub fn run(reports: &[Value], p: &FusionParams) -> Result<Value, String> {
                 "caption": e.caption,
                 "class": e.class,
                 "type": if e.interactive { "interactive" } else { "element" },
-                "conf": (e.conf * 1000.0).round() / 1000.0,
+                "conf": conf,
+                "assertion": assertion,
                 "sources": e.sources,
                 "interactive": e.interactive,
                 "coordsys": "image_px",
@@ -414,5 +422,38 @@ mod tests {
     fn empty_inputs_ok() {
         let out = run(&[], &FusionParams::default()).unwrap();
         assert_eq!(out["elements"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn assertion_high_conf_confirmed() {
+        // E6 门禁：conf ≥ 0.7 → "已确认"
+        let ocr = ocr_report(vec![json!({
+            "bbox": [100.0, 100.0, 200.0, 150.0],
+            "text": "btn1", "conf": 0.9, "type": "text",
+        })]);
+        let out = run(&[ocr], &FusionParams::default()).unwrap();
+        let e = &out["elements"].as_array().unwrap()[0];
+        let a = e["assertion"].as_str().unwrap();
+        assert!(a.contains("已确认"), "conf 0.9 应为已确认: {a}");
+        assert!(a.contains("ocr"), "断言应含来源: {a}");
+        // D-S 融合会映射 conf（0.9 → 0.72），断言应含融合后 conf 值
+        let conf = e["conf"].as_f64().unwrap();
+        assert!(
+            a.contains(&format!("{conf}")),
+            "断言应含融合后 conf {conf}: {a}"
+        );
+    }
+
+    #[test]
+    fn assertion_low_conf_speculative() {
+        // E6 门禁：conf < 0.7 → "推测"
+        let ocr = ocr_report(vec![json!({
+            "bbox": [100.0, 100.0, 200.0, 150.0],
+            "text": "btn1", "conf": 0.5, "type": "text",
+        })]);
+        let out = run(&[ocr], &FusionParams::default()).unwrap();
+        let e = &out["elements"].as_array().unwrap()[0];
+        let a = e["assertion"].as_str().unwrap();
+        assert!(a.contains("推测"), "conf 0.5 应为推测: {a}");
     }
 }

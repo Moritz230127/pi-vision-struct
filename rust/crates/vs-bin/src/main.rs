@@ -280,6 +280,9 @@ enum Command {
         bbox: Option<String>,
         #[arg(long)]
         sensor: Option<String>,
+        /// probe 确认模式：对指定融合元素 id 重新检测（E6 确定性锚点）。
+        #[arg(long)]
+        confirm: Option<String>,
     },
     /// 三维装配审计（OBB-SAT + kd-tree 点云距离）。
     Audit3d {
@@ -567,12 +570,14 @@ fn main() {
             region,
             bbox,
             sensor,
+            confirm,
         } => protocol::run(&protocol::ProtocolParams {
             action,
             image: image.to_string_lossy().into_owned(),
             region,
             bbox,
             sensor,
+            confirm,
         })
         .unwrap_or_else(|e| json!({"error": "vs_protocol failed", "detail": e})),
         Command::Audit3d {

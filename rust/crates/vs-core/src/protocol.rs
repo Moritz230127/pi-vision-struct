@@ -19,6 +19,8 @@ pub struct ProtocolParams {
     pub region: Option<String>,
     pub bbox: Option<String>,
     pub sensor: Option<String>,
+    /// probe 确认模式：对指定融合元素 id 重新检测（E6 确定性锚点）。
+    pub confirm: Option<String>,
 }
 
 /// analyze：粗报告（plan3 E3 分层感知——默认轻量路径）。
@@ -109,9 +111,45 @@ fn analyze(image: &str) -> Result<Value, String> {
         "fusion": fused.as_ref().map(|v| v.get("metrics").cloned().unwrap_or(json!({}))).unwrap_or(json!({})),
     });
     report["notation"] = json!(NOTATION_GUIDE);
-    report["note"] = json!(
-        "粗报告（轻量）：elements 为融合元素清单（编号引用，如 click [3]）；scene 为全局统计摘要；edge 为边缘密度热图。需要精确定位时用 zoom 放大区域，或 probe 定向取证。"
-    );
+    // E6 输出模板：已确认元素 vs 推测元素（conf 阈值 0.7）
+    let (confirmed_ids, speculative_ids): (Vec<i64>, Vec<i64>) = fused
+        .as_ref()
+        .ok()
+        .and_then(|v| v.get("elements").and_then(|e| e.as_array()))
+        .map(|els| {
+            type ConfPair = (i64, f64);
+            let (conf, spec): (Vec<ConfPair>, Vec<ConfPair>) = els
+                .iter()
+                .filter_map(|e| {
+                    let id = e.get("id").and_then(|i| i.as_i64())?;
+                    let conf = e.get("conf").and_then(|c| c.as_f64()).unwrap_or(0.0);
+                    Some((id, conf))
+                })
+                .partition(|(_, c)| *c >= 0.7);
+            (
+                conf.into_iter().map(|(id, _)| id).collect(),
+                spec.into_iter().map(|(id, _)| id).collect(),
+            )
+        })
+        .unwrap_or_default();
+    let fmt_ids = |ids: &[i64]| {
+        if ids.is_empty() {
+            "[]".to_string()
+        } else {
+            format!(
+                "[{}]",
+                ids.iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        }
+    };
+    report["note"] = json!(format!(
+        "粗报告（轻量）：elements 为融合元素清单（编号引用，如 click [3]）；scene 为全局统计摘要；edge 为边缘密度热图。已确认元素 {}（conf ≥ 0.7）；推测元素 {}（conf < 0.7，需 probe --confirm 验证）。需要精确定位时用 zoom 放大区域，或 probe 定向取证。",
+        fmt_ids(&confirmed_ids),
+        fmt_ids(&speculative_ids)
+    ));
     Ok(report)
 }
 
@@ -289,6 +327,112 @@ fn upscale_temp(image: &str, factor: u32) -> Result<String, String> {
     Ok(tmp.to_string_lossy().into_owned())
 }
 
+/// probe 确认模式（plan3 E6）：对指定融合元素 id 重新检测（ocr + omniparser 局部），
+/// 返回确认/否认 + 新 conf。DeepSeek 可先 probe 确认元素存在，再执行动作。
+fn probe_confirm(image: &str, id: usize) -> Result<Value, String> {
+    // 1) 先跑 analyze 得到融合元素清单
+    let base = analyze(image)?;
+    let els = base
+        .get("elements")
+        .and_then(|e| e.as_array())
+        .ok_or_else(|| "analyze 无融合元素".to_string())?;
+    let target = els
+        .get(id)
+        .ok_or_else(|| format!("元素 id {id} 不存在（共 {} 个）", els.len()))?;
+    let bbox = target
+        .get("bbox")
+        .and_then(|b| b.as_array())
+        .ok_or_else(|| "元素无 bbox".to_string())?;
+    if bbox.len() < 4 {
+        return Err("元素 bbox 不完整".into());
+    }
+    let to_f64 = |v: &Value| v.as_f64().unwrap_or_else(|| v.as_i64().unwrap_or(0) as f64);
+    let (x1, y1, x2, y2) = (
+        to_f64(&bbox[0]) as i64,
+        to_f64(&bbox[1]) as i64,
+        to_f64(&bbox[2]) as i64,
+        to_f64(&bbox[3]) as i64,
+    );
+    let region = format!("{x1},{y1},{x2},{y2}");
+
+    // 2) 局部重检：裁剪 region → 2× upscale → ocr + omniparser → 融合
+    let cropped = crop_to_temp(image, &region)?;
+    let upscaled = upscale_temp(&cropped, 2)?;
+    let _ = std::fs::remove_file(&cropped);
+    let up_img = Path::new(&upscaled);
+    let ocr = crate::ocr::run(
+        up_img,
+        &crate::ocr::OcrParams {
+            max_items: 10,
+            min_conf: 0.3,
+        },
+    );
+    let omni = crate::omniparser::run(
+        up_img,
+        &crate::omniparser::OmniparserParams {
+            max_items: 5,
+            min_conf: 0.2,
+        },
+    );
+    let _ = std::fs::remove_file(&upscaled);
+    let mut fusion_reports: Vec<Value> = Vec::new();
+    if let Ok(v) = &ocr {
+        fusion_reports.push(v.clone());
+    }
+    if let Ok(v) = &omni {
+        fusion_reports.push(v.clone());
+    }
+    let fused = crate::element_fusion::run(
+        &fusion_reports,
+        &crate::element_fusion::FusionParams::default(),
+    );
+
+    // 3) 判定：局部融合有元素 → 确认；否则 → 否认
+    let local_els = fused
+        .as_ref()
+        .map(|v| {
+            v.get("elements")
+                .and_then(|e| e.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
+    let new_conf = fused
+        .as_ref()
+        .ok()
+        .and_then(|v| v.get("elements").and_then(|e| e.as_array()))
+        .and_then(|a| a.first())
+        .and_then(|e| e.get("conf"))
+        .and_then(|c| c.as_f64())
+        .unwrap_or(0.0);
+    let confirmed = local_els > 0 && new_conf >= 0.5;
+
+    let mut report = envelope(
+        Some("probe_confirm"),
+        &["element_fusion"],
+        Some("image_px"),
+        Some(json!({
+            "type": "image",
+            "path": image,
+            "element_id": id,
+            "region": [x1, y1, x2, y2],
+        })),
+    );
+    report["confirmed"] = json!(confirmed);
+    report["new_conf"] = json!((new_conf * 1000.0).round() / 1000.0);
+    report["local_elements"] = json!(local_els);
+    report["elements"] = fused
+        .as_ref()
+        .map(|v| v.get("elements").cloned().unwrap_or(json!([])))
+        .unwrap_or(json!([]));
+    report["note"] = json!(if confirmed {
+        format!("确认：元素 [{id}] 存在（局部重检 conf {new_conf:.3}）")
+    } else {
+        format!("否认：元素 [{id}] 未在局部重检中确认（conf {new_conf:.3}）")
+    });
+    Ok(report)
+}
+
 /// probe：单传感器定向证据。
 fn probe(image: &str, bbox: &str, sensor: &str) -> Result<Value, String> {
     let coords: Vec<i64> = bbox
@@ -422,10 +566,18 @@ pub fn run(p: &ProtocolParams) -> Result<Value, String> {
             zoom(&p.image, &region)
         }
         "probe" => {
+            // E6：confirm 模式（对元素 id 重检）优先于 bbox+sensor 模式
+            if let Some(cid) = &p.confirm {
+                let id: usize = cid
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("confirm 需要整数元素 id，收到: {cid}"))?;
+                return probe_confirm(&p.image, id);
+            }
             let bbox = p
                 .bbox
                 .clone()
-                .ok_or_else(|| "probe 需要 --bbox x1,y1,x2,y2".to_string())?;
+                .ok_or_else(|| "probe 需要 --bbox x1,y1,x2,y2 或 --confirm <id>".to_string())?;
             let sensor = p
                 .sensor
                 .clone()
@@ -448,6 +600,7 @@ mod tests {
             region: None,
             bbox: None,
             sensor: None,
+            confirm: None,
         };
         assert!(run(&p).is_err());
     }
@@ -460,6 +613,7 @@ mod tests {
             region: None,
             bbox: None,
             sensor: None,
+            confirm: None,
         };
         assert!(run(&p).is_err());
     }
@@ -472,6 +626,7 @@ mod tests {
             region: None,
             bbox: None,
             sensor: None,
+            confirm: None,
         };
         assert!(run(&p).is_err());
     }
@@ -484,8 +639,88 @@ mod tests {
             region: Some("1,2,3".into()),
             bbox: None,
             sensor: None,
+            confirm: None,
         };
         assert!(run(&p).is_err());
+    }
+
+    #[test]
+    fn probe_confirm_invalid_id_rejected() {
+        // E6：confirm 非整数 → 报错
+        let p = ProtocolParams {
+            action: "probe".into(),
+            image: "x.png".into(),
+            region: None,
+            bbox: None,
+            sensor: None,
+            confirm: Some("abc".into()),
+        };
+        assert!(run(&p).is_err(), "confirm 非整数应报错");
+    }
+
+    #[test]
+    fn probe_confirm_unknown_id_rejected() {
+        // E6：confirm 超范围 id → 报错
+        let img = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../bench/samples/s03_alignment.png"
+        );
+        let p = ProtocolParams {
+            action: "probe".into(),
+            image: img.into(),
+            region: None,
+            bbox: None,
+            sensor: None,
+            confirm: Some("999".into()),
+        };
+        assert!(run(&p).is_err(), "confirm 超范围 id 应报错");
+    }
+
+    #[test]
+    fn probe_confirm_known_element_confirms() {
+        // E6：对已知元素 confirm → 确认 + 新 conf
+        let img = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../bench/samples/s03_alignment.png"
+        );
+        let p = ProtocolParams {
+            action: "probe".into(),
+            image: img.into(),
+            region: None,
+            bbox: None,
+            sensor: None,
+            confirm: Some("0".into()),
+        };
+        let r = run(&p).unwrap();
+        assert_eq!(r["confirmed"], true, "已知元素应确认");
+        assert!(r["new_conf"].as_f64().unwrap() > 0.0, "确认应带新 conf");
+        let note = r["note"].as_str().unwrap();
+        assert!(note.contains("确认"), "note 应含确认: {note}");
+    }
+
+    #[test]
+    fn analyze_note_has_assertion_summary() {
+        // E6：analyze note 含已确认/推测元素汇总
+        let img = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../bench/samples/s03_alignment.png"
+        );
+        let p = ProtocolParams {
+            action: "analyze".into(),
+            image: img.into(),
+            region: None,
+            bbox: None,
+            sensor: None,
+            confirm: None,
+        };
+        let r = run(&p).unwrap();
+        let note = r["note"].as_str().unwrap();
+        assert!(note.contains("已确认元素"), "note 应含已确认元素: {note}");
+        assert!(note.contains("推测元素"), "note 应含推测元素: {note}");
+        // 每元素带 assertion 字段
+        for e in r["elements"].as_array().unwrap() {
+            assert!(e.get("assertion").is_some(), "元素应带存在性断言");
+        }
     }
 
     #[test]
@@ -501,6 +736,7 @@ mod tests {
             region: None,
             bbox: None,
             sensor: None,
+            confirm: None,
         };
         let r = run(&p).unwrap();
         assert!(r.get("ascii").is_none(), "analyze 不应返回 ascii 全栅格");
@@ -540,6 +776,7 @@ mod tests {
             region: Some("100,80,300,200".into()),
             bbox: None,
             sensor: None,
+            confirm: None,
         };
         let r = run(&p).unwrap();
         assert_eq!(r["source"]["upscale"], 2, "zoom 应 2× upscale");

@@ -115,6 +115,8 @@ struct ProtocolParams {
     region: Option<String>,
     bbox: Option<String>,
     sensor: Option<String>,
+    /// probe 确认模式：对指定融合元素 id 重新检测（E6 确定性锚点）。
+    confirm: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
@@ -515,6 +517,7 @@ impl VsToolHandler {
             region: p.region,
             bbox: p.bbox,
             sensor: p.sensor,
+            confirm: p.confirm,
         })
         .map(Json)
     }
