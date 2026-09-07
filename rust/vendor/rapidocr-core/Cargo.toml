@@ -56,6 +56,12 @@ required-features = ["tokio"]
 [dependencies.anyhow]
 version = "1"
 
+[dependencies.geo-clipper]
+version = "0.9"
+
+[dependencies.geo-types]
+version = "0.7"
+
 [dependencies.image]
 version = "0.25"
 

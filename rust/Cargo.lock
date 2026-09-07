@@ -866,6 +866,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
+name = "clipper-sys"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5141c32419064aef7322f754b92fd4ea53c360c1ad984ec38b58af533eba3ac"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1665,6 +1674,28 @@ checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
 dependencies = [
  "typenum",
  "version_check",
+]
+
+[[package]]
+name = "geo-clipper"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2370335cc0c40c7bc1e5b0ead27bdbb2132d54cfbb96248a4bdd65db1a6873aa"
+dependencies = [
+ "clipper-sys",
+ "geo-types",
+]
+
+[[package]]
+name = "geo-types"
+version = "0.7.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "777d18aa0f12f8b285331cd867133ee14422b3f023f6d388034c47d43e28786a"
+dependencies = [
+ "approx",
+ "num-traits",
+ "serde",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -3718,6 +3749,8 @@ name = "rapidocr-core"
 version = "0.2.2"
 dependencies = [
  "anyhow",
+ "geo-clipper",
+ "geo-types",
  "image",
  "imageproc",
  "ndarray 0.17.2",
@@ -5127,6 +5160,7 @@ dependencies = [
  "atspi",
  "blend-rs",
  "chromiumoxide",
+ "geo-clipper",
  "image",
  "ndarray 0.16.1",
  "ort",

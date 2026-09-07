@@ -24,7 +24,13 @@ impl Default for WallParams {
         Self {
             colors: 5,
             max_files: 200,
-            exts: vec![".png".into(), ".jpg".into(), ".jpeg".into(), ".webp".into(), ".bmp".into()],
+            exts: vec![
+                ".png".into(),
+                ".jpg".into(),
+                ".jpeg".into(),
+                ".webp".into(),
+                ".bmp".into(),
+            ],
         }
     }
 }
@@ -184,7 +190,11 @@ fn saturation_tier(s: i64) -> &'static str {
 }
 
 fn aspect_of(w: u32, h: u32) -> &'static str {
-    let r = if h == 0 { 1.0 } else { f64::from(w) / f64::from(h) };
+    let r = if h == 0 {
+        1.0
+    } else {
+        f64::from(w) / f64::from(h)
+    };
     if r > 1.2 {
         "横版"
     } else if r < 0.83 {
@@ -301,7 +311,13 @@ pub fn run(dir: &Path, p: &WallParams) -> Result<Value, String> {
     let exts: Vec<String> = p
         .exts
         .iter()
-        .map(|e| if e.starts_with('.') { e.clone() } else { format!(".{e}") })
+        .map(|e| {
+            if e.starts_with('.') {
+                e.clone()
+            } else {
+                format!(".{e}")
+            }
+        })
         .collect();
     let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
         .map_err(|e| format!("read_dir {dir:?}: {e}"))?
@@ -320,7 +336,10 @@ pub fn run(dir: &Path, p: &WallParams) -> Result<Value, String> {
     let mut items: Vec<Value> = Vec::new();
     for path in &files {
         let mut item = analyze_image(path, p.colors);
-        item["file"] = json!(path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        item["file"] = json!(path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default());
         items.push(item);
     }
 
@@ -331,7 +350,11 @@ pub fn run(dir: &Path, p: &WallParams) -> Result<Value, String> {
     for it in &items {
         if let Some(prog) = it.get("programmatic") {
             let push = |v: &mut Vec<(String, u32)>, key: &str| {
-                let k = prog.get(key).and_then(|x| x.as_str()).unwrap_or("?").to_string();
+                let k = prog
+                    .get(key)
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("?")
+                    .to_string();
                 if let Some(e) = v.iter_mut().find(|(s, _)| *s == k) {
                     e.1 += 1;
                 } else {
@@ -445,7 +468,11 @@ mod dbg_tests {
     #[test]
     fn dbg_blue_hue() {
         let data = [0u8, 0, 255].repeat(5000);
-        let img = RgbImage { width: 50, height: 100, data };
+        let img = RgbImage {
+            width: 50,
+            height: 100,
+            data,
+        };
         let h = dominant_hue(&img);
         println!("dominant_hue = {h:?}");
         let v = 171.0 * 360.0 / 255.0;

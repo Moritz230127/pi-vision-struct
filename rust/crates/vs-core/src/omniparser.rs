@@ -172,7 +172,7 @@ fn detect_icons(img: &crate::image::RgbImage, min_conf: f64) -> Result<Vec<DetBo
     let pad_left = (640 - rw) / 2;
     let pad_top = (640 - rh) / 2;
     let mut data = vec![114.0f32 / 255.0; 3 * 640 * 640]; // 灰边（channel 优先布局）
-    // LANCZOS resize（PIL 精确复刻）
+                                                          // LANCZOS resize（PIL 精确复刻）
     let resized_data = resize_lanczos(img, rw as u32, rh as u32);
     for y in 0..rh {
         for x in 0..rw {
@@ -219,7 +219,7 @@ fn caption_icon(
     tokenizer: &tokenizers::Tokenizer,
     sessions: &FlorenceSessions,
 ) -> Result<String, String> {
-    // 1) 裁剪 + resize 64×64（双线性，与 cv2.resize 近似）
+    // 1) 裁剪 + resize 64×64（中间尺寸，与 Python `cv2.resize(cropped, (64, 64))` 一致）
     let (x1, y1, x2, y2) = (
         box_xyxy[0].max(0.0) as usize,
         box_xyxy[1].max(0.0) as usize,
@@ -231,21 +231,43 @@ fn caption_icon(
     }
     let cw = x2 - x1;
     let ch = y2 - y1;
-    let mut px = vec![0.0f32; 3 * 64 * 64];
-    for y in 0..64 {
-        for x in 0..64 {
-            let sx = x1 + (x as f64 * cw as f64 / 64.0) as usize;
-            let sy = y1 + (y as f64 * ch as f64 / 64.0) as usize;
-            let si = (sy * img.width as usize + sx) * 3;
-            let di = (y * 64 + x) * 3;
-            // CLIP normalize（ImageNet mean/std）
-            px[di] = (img.data[si] as f32 / 255.0 - 0.485) / 0.229;
-            px[di + 1] = (img.data[si + 1] as f32 / 255.0 - 0.456) / 0.224;
-            px[di + 2] = (img.data[si + 2] as f32 / 255.0 - 0.406) / 0.225;
+    // 裁剪 → 64×64（双线性，与 Python `cv2.resize(cropped, (64, 64))` 一致）
+    let mut crop_px = vec![0u8; 3 * cw * ch];
+    for y in 0..ch {
+        for x in 0..cw {
+            let si = ((y1 + y) * img.width as usize + (x1 + x)) * 3;
+            let di = (y * cw + x) * 3;
+            crop_px[di] = img.data[si];
+            crop_px[di + 1] = img.data[si + 1];
+            crop_px[di + 2] = img.data[si + 2];
         }
     }
-    // 2) vision_encoder
-    let tensor = ort::value::Tensor::from_array(([1usize, 3, 64, 64], px.into_boxed_slice()))
+    let crop_img = crate::image::RgbImage {
+        width: cw as u32,
+        height: ch as u32,
+        data: crop_px,
+    };
+    // cv2.resize INTER_LINEAR（OpenCV 像素中心对齐，与 Python `cv2.resize(cropped, (64, 64))` 一致）
+    let small = crate::util::resize_cv2_linear(&crop_img, 64, 64);
+    // 2) processor 预处理：resize 到 768×768（BICUBIC）+ /255 + CLIP normalize
+    //    （Florence2ImageProcessor: size 768×768, resample=BICUBIC, mean/std CLIP）
+    let small_img = crate::image::RgbImage {
+        width: 64,
+        height: 64,
+        data: small,
+    };
+    let resized = crate::util::resize_bicubic(&small_img, 768, 768);
+    let mut px = vec![0.0f32; 3 * 768 * 768];
+    for i in 0..(768 * 768) {
+        let r = resized[i * 3] as f32 / 255.0;
+        let g = resized[i * 3 + 1] as f32 / 255.0;
+        let b = resized[i * 3 + 2] as f32 / 255.0;
+        px[i] = (r - 0.485) / 0.229;
+        px[768 * 768 + i] = (g - 0.456) / 0.224;
+        px[2 * 768 * 768 + i] = (b - 0.406) / 0.225;
+    }
+    // 3) vision_encoder
+    let tensor = ort::value::Tensor::from_array(([1usize, 3, 768, 768], px.into_boxed_slice()))
         .map_err(|e| format!("tensor: {e}"))?;
     let mut vision_guard = sessions.vision.lock().unwrap();
     let out = vision_guard
@@ -256,9 +278,9 @@ fn caption_icon(
         .map_err(|e| format!("image_features: {e}"))?;
     let n = shape.num_elements();
     let image_features: Vec<f32> = data[..n].to_vec();
-    // 3) tokenize "<CAPTION>"
+    // 3) tokenize prompt（processor 把 <CAPTION> 替换为 task prompt）
     let encoding = tokenizer
-        .encode("<CAPTION>", true)
+        .encode("What does the image describe?", true)
         .map_err(|e| format!("tokenize: {e}"))?;
     let ids: Vec<i64> = encoding.get_ids().iter().map(|&i| i as i64).collect();
     let ids_len = ids.len();
@@ -291,16 +313,21 @@ fn caption_icon(
         .map_err(|e| format!("encoder_outputs: {e}"))?;
     let n = shape.num_elements();
     let encoder_outputs: Vec<f32> = data[..n].to_vec();
-    // 6) decoder 自回归（greedy，max_new_tokens=20）
+    // 6) decoder 自回归（greedy，max_new_tokens=20；与 Python `do_sample=False` 一致）
     let enc_tensor = ort::value::Tensor::from_array((
         [1usize, merged_len, 768],
         encoder_outputs.into_boxed_slice(),
     ))
     .map_err(|e| format!("enc tensor: {e}"))?;
-    let mut gen_ids: Vec<i64> = vec![2]; // </s> 起始（Florence-2 decoder 起始 token）
-    let eos = 2; // </s>
-    const MAX_DEC_SEQ: usize = 20;
+    // decoder 起始输入 = [bos]（transformers generate 的 _prepare_decoder_input_ids_for_generation）
+    // Florence-2 config: bos_token_id=2=</s>，forced_eos_token_id=2
+    let mut gen_ids: Vec<i64> = vec![2];
+    let eos = 2; // generation_config.forced_eos_token_id
+    const MAX_DEC_SEQ: usize = 20; // ONNX decoder 固定 seq=20
     for _ in 0..20 {
+        if gen_ids.len() >= MAX_DEC_SEQ {
+            break; // 达到 decoder 最大序列长度
+        }
         // decoder 输入固定 seq=20（padding + attention_mask）
         let mut dec_ids = vec![0i64; MAX_DEC_SEQ];
         let mut dec_mask = vec![0i64; MAX_DEC_SEQ];
@@ -334,6 +361,7 @@ fn caption_icon(
             }
         }
         let next = best.0 as i64;
+        eprintln!("[omni-debug] step {}: token {next}", gen_ids.len());
         if next == eos {
             break;
         }

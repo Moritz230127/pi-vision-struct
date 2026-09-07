@@ -29,13 +29,25 @@ fn assert_json_eq(a: &Value, b: &Value, path: &str) {
         (Value::Bool(x), Value::Bool(y)) => assert_eq!(x, y, "{path}"),
         (Value::Null, Value::Null) => {}
         (Value::Array(x), Value::Array(y)) => {
-            assert_eq!(x.len(), y.len(), "{path}: array len {} vs {}", x.len(), y.len());
+            assert_eq!(
+                x.len(),
+                y.len(),
+                "{path}: array len {} vs {}",
+                x.len(),
+                y.len()
+            );
             for (i, (xe, ye)) in x.iter().zip(y).enumerate() {
                 assert_json_eq(xe, ye, &format!("{path}[{i}]"));
             }
         }
         (Value::Object(x), Value::Object(y)) => {
-            assert_eq!(x.len(), y.len(), "{path}: object keys {} vs {}", x.len(), y.len());
+            assert_eq!(
+                x.len(),
+                y.len(),
+                "{path}: object keys {} vs {}",
+                x.len(),
+                y.len()
+            );
             for (k, xv) in x {
                 // source.dir 为环境相关路径（Python 绝对路径 vs Rust 相对路径）
                 if path.ends_with(".source") && k == "dir" {

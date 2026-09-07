@@ -107,13 +107,53 @@ pub fn resize_bilinear(img: &RgbImage, out_w: u32, out_h: u32) -> Vec<u8> {
     pil_resize(img, out_w, out_h, PilFilter::Bilinear)
 }
 
+/// PIL `Image.resize(..., Image.BICUBIC)` 精确复刻（Catmull-Rom 内核 a=-0.5）。
+pub fn resize_bicubic(img: &RgbImage, out_w: u32, out_h: u32) -> Vec<u8> {
+    pil_resize(img, out_w, out_h, PilFilter::Bicubic)
+}
+
+/// OpenCV `cv2.resize(..., INTER_LINEAR)` 精确复刻（像素中心对齐，-0.5 偏移）。
+///
+/// OpenCV 与 PIL 双线性不同：`sx = (x+0.5)*scale - 0.5`（PIL 无 -0.5）。
+/// OmniParser 的图标裁剪用 `cv2.resize(cropped, (64, 64))`，需此实现。
+pub fn resize_cv2_linear(img: &RgbImage, out_w: u32, out_h: u32) -> Vec<u8> {
+    let (iw, ih) = (img.width as f64, img.height as f64);
+    let (ow, oh) = (out_w as f64, out_h as f64);
+    let scale_x = iw / ow;
+    let scale_y = ih / oh;
+    let mut out = vec![0u8; (out_w * out_h * 3) as usize];
+    for y in 0..out_h as usize {
+        let sy = (y as f64 + 0.5) * scale_y - 0.5;
+        let y0 = sy.floor().max(0.0) as usize;
+        let y1 = (y0 + 1).min(ih as usize - 1);
+        let fy = sy - y0 as f64;
+        for x in 0..out_w as usize {
+            let sx = (x as f64 + 0.5) * scale_x - 0.5;
+            let x0 = sx.floor().max(0.0) as usize;
+            let x1 = (x0 + 1).min(iw as usize - 1);
+            let fx = sx - x0 as f64;
+            for c in 0..3 {
+                let p00 = f64::from(img.data[(y0 * iw as usize + x0) * 3 + c]);
+                let p01 = f64::from(img.data[(y0 * iw as usize + x1) * 3 + c]);
+                let p10 = f64::from(img.data[(y1 * iw as usize + x0) * 3 + c]);
+                let p11 = f64::from(img.data[(y1 * iw as usize + x1) * 3 + c]);
+                let v =
+                    (p00 * (1.0 - fx) + p01 * fx) * (1.0 - fy) + (p10 * (1.0 - fx) + p11 * fx) * fy;
+                out[(y * out_w as usize + x) * 3 + c] = v.round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    out
+}
+
 #[derive(Clone, Copy)]
 enum PilFilter {
     Lanczos,
     Bilinear,
+    Bicubic,
 }
 
-/// PIL 内核：lanczos（3-lobe）与 triangle（双线性）。
+/// PIL 内核：lanczos（3-lobe）、triangle（双线性）、cubic（Catmull-Rom a=-0.5）。
 fn kernel(f: PilFilter, x: f64) -> f64 {
     match f {
         PilFilter::Lanczos => {
@@ -134,20 +174,28 @@ fn kernel(f: PilFilter, x: f64) -> f64 {
                 1.0 - x.abs()
             }
         }
+        PilFilter::Bicubic => {
+            // Catmull-Rom（a=-0.5），PIL `cubic` 内核
+            let ax = x.abs();
+            if ax >= 2.0 {
+                0.0
+            } else if ax < 1.0 {
+                (1.5 * ax - 2.5) * ax * ax + 1.0
+            } else {
+                ((-0.5 * ax + 2.5) * ax - 4.0) * ax + 2.0
+            }
+        }
     }
 }
 
 /// PIL `precompute_coeffs`：每输出像素的窗口边界 + 归一化定点权重。
 /// 返回 (bounds[out*2], kk[out*ksize], ksize)。
-fn precompute_coeffs(
-    in_size: usize,
-    out_size: usize,
-    f: PilFilter,
-) -> (Vec<i32>, Vec<i64>, usize) {
+fn precompute_coeffs(in_size: usize, out_size: usize, f: PilFilter) -> (Vec<i32>, Vec<i64>, usize) {
     const PRECISION_BITS: i32 = 22;
     let (support_base, _) = match f {
         PilFilter::Lanczos => (3.0, ()),
         PilFilter::Bilinear => (1.0, ()),
+        PilFilter::Bicubic => (2.0, ()),
     };
     let scale = in_size as f64 / out_size as f64;
     let filterscale = scale.max(1.0);
@@ -271,7 +319,11 @@ mod tests {
                 data.push(((x + y) * 30 % 256) as u8);
             }
         }
-        RgbImage { width: 5, height: 4, data }
+        RgbImage {
+            width: 5,
+            height: 4,
+            data,
+        }
     }
 
     #[test]
@@ -280,10 +332,18 @@ mod tests {
         // PIL golden：5×4 → 8×7 LANCZOS（首行 + 末行抽样）
         let out = resize_lanczos(&grad_5x4(), 8, 7);
         // 首行：[(0,0,0),(15,0,7),(54,0,30),(87,0,50),(113,0,66),(146,0,86),(185,0,109),(204,0,120)]
-        let row0: Vec<[u8; 3]> = (0..8).map(|x| [out[x * 3], out[x * 3 + 1], out[x * 3 + 2]]).collect();
+        let row0: Vec<[u8; 3]> = (0..8)
+            .map(|x| [out[x * 3], out[x * 3 + 1], out[x * 3 + 2]])
+            .collect();
         let expect0 = [
-            [0, 0, 0], [15, 0, 7], [54, 0, 30], [87, 0, 50],
-            [113, 0, 66], [146, 0, 86], [185, 0, 109], [204, 0, 120],
+            [0, 0, 0],
+            [15, 0, 7],
+            [54, 0, 30],
+            [87, 0, 50],
+            [113, 0, 66],
+            [146, 0, 86],
+            [185, 0, 109],
+            [204, 0, 120],
         ];
         assert_eq!(row0, expect0, "LANCZOS 首行与 PIL 不一致");
         // 末行（y=6）：[(0,185,90),(15,185,101),...]
@@ -294,8 +354,14 @@ mod tests {
             })
             .collect();
         let expect6 = [
-            [0, 185, 90], [15, 185, 101], [54, 185, 124], [87, 185, 144],
-            [113, 185, 160], [146, 185, 180], [185, 185, 203], [204, 185, 214],
+            [0, 185, 90],
+            [15, 185, 101],
+            [54, 185, 124],
+            [87, 185, 144],
+            [113, 185, 160],
+            [146, 185, 180],
+            [185, 185, 203],
+            [204, 185, 214],
         ];
         assert_eq!(row6, expect6, "LANCZOS 末行与 PIL 不一致");
         // 放大 2×：5×4 → 10×8
@@ -316,10 +382,18 @@ mod tests {
         use super::resize_bilinear;
         // PIL golden：5×4 → 8×7 BILINEAR（首行 + 末行抽样）
         let out = resize_bilinear(&grad_5x4(), 8, 7);
-        let row0: Vec<[u8; 3]> = (0..8).map(|x| [out[x * 3], out[x * 3 + 1], out[x * 3 + 2]]).collect();
+        let row0: Vec<[u8; 3]> = (0..8)
+            .map(|x| [out[x * 3], out[x * 3 + 1], out[x * 3 + 2]])
+            .collect();
         let expect0 = [
-            [0, 0, 0], [22, 0, 13], [53, 0, 32], [84, 0, 51],
-            [116, 0, 69], [147, 0, 88], [178, 0, 107], [200, 0, 120],
+            [0, 0, 0],
+            [22, 0, 13],
+            [53, 0, 32],
+            [84, 0, 51],
+            [116, 0, 69],
+            [147, 0, 88],
+            [178, 0, 107],
+            [200, 0, 120],
         ];
         assert_eq!(row0, expect0, "BILINEAR 首行与 PIL 不一致");
         let row6: Vec<[u8; 3]> = (0..8)
@@ -329,8 +403,14 @@ mod tests {
             })
             .collect();
         let expect6 = [
-            [0, 180, 90], [22, 180, 103], [53, 180, 122], [84, 180, 141],
-            [116, 180, 159], [147, 180, 178], [178, 180, 197], [200, 180, 210],
+            [0, 180, 90],
+            [22, 180, 103],
+            [53, 180, 122],
+            [84, 180, 141],
+            [116, 180, 159],
+            [147, 180, 178],
+            [178, 180, 197],
+            [200, 180, 210],
         ];
         assert_eq!(row6, expect6, "BILINEAR 末行与 PIL 不一致");
     }

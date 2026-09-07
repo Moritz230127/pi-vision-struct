@@ -45,20 +45,16 @@ fn weights_path() -> String {
     format!("{home}/.cache/vsensor/mobile_sam_encoder.onnx")
 }
 
-/// Python 解码助手路径。
-fn decoder_script() -> String {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("python");
-    root.join("vs_segment_decoder.py").display().to_string()
+/// prompt encoder ONNX 路径。
+fn prompt_encoder_path() -> String {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    format!("{home}/.cache/vsensor/mobile_sam_prompt_encoder.onnx")
 }
 
-/// vsensor env python。
-fn vsensor_python() -> String {
+/// mask decoder ONNX 路径。
+fn mask_decoder_path() -> String {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    format!("{home}/conda-envs/vsensor/bin/python")
+    format!("{home}/.cache/vsensor/mobile_sam_mask_decoder.onnx")
 }
 
 /// 预处理：resize longest side 1024（round half up，BICUBIC）→
@@ -92,57 +88,45 @@ fn preprocess(img: &crate::image::RgbImage) -> Result<(Vec<f32>, u32, u32), Stri
     Ok((data, w, h))
 }
 
-/// 写 npy 文件（float32 或 bool，简单格式）。
-fn write_npy(path: &Path, shape: &[usize], data: &[u8], dtype: &str) -> Result<(), String> {
-    // dtype: "f4" (float32) 或 "b1" (bool)
-    let descr = match dtype {
-        "f4" => "<f4",
-        "b1" => "|b1",
-        _ => return Err(format!("unsupported npy dtype {dtype}")),
-    };
-    let shape_str = shape
-        .iter()
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let header =
-        format!("{{'descr': '{descr}', 'fortran_order': False, 'shape': ({shape_str},), }}");
-    // header 对齐到 64 字节（含 magic 6 + version 2 + len 2）
-    let mut header = header;
-    let base = 6 + 2 + 2;
-    while (base + header.len() + 1) % 64 != 0 {
-        header.push(' ');
+/// 双线性 resize 2D 单通道（torch F.interpolate bilinear align_corners=False 等价）。
+fn bilinear_resize_2d(src: &[f32], sw: usize, sh: usize, dw: usize, dh: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; dw * dh];
+    if sw == dw && sh == dh {
+        out.copy_from_slice(src);
+        return out;
     }
-    header.push('\n');
-    let mut out = Vec::with_capacity(base + header.len() + data.len());
-    out.extend_from_slice(b"\x93NUMPY");
-    out.extend_from_slice(&[1, 0]);
-    out.extend_from_slice(&(header.len() as u16).to_le_bytes());
-    out.extend_from_slice(header.as_bytes());
-    out.extend_from_slice(data);
-    std::fs::write(path, out).map_err(|e| format!("write npy {path:?}: {e}"))
+    for y in 0..dh {
+        // torch F.interpolate bilinear align_corners=False：
+        //   src_idx = scale*(dst+0.5) - 0.5；src_idx < 0 → clamp 到 0
+        let sy = ((y as f64 + 0.5) * sh as f64 / dh as f64 - 0.5).max(0.0);
+        let y0 = sy.floor() as usize;
+        let y1 = (y0 + 1).min(sh - 1);
+        let fy = (sy - y0 as f64) as f32;
+        for x in 0..dw {
+            let sx = ((x as f64 + 0.5) * sw as f64 / dw as f64 - 0.5).max(0.0);
+            let x0 = sx.floor() as usize;
+            let x1 = (x0 + 1).min(sw - 1);
+            let fx = (sx - x0 as f64) as f32;
+            let p00 = src[y0 * sw + x0];
+            let p01 = src[y0 * sw + x1];
+            let p10 = src[y1 * sw + x0];
+            let p11 = src[y1 * sw + x1];
+            out[y * dw + x] =
+                (p00 * (1.0 - fx) + p01 * fx) * (1.0 - fy) + (p10 * (1.0 - fx) + p11 * fx) * fy;
+        }
+    }
+    out
 }
 
-/// 读 npy 文件（float32 或 bool）。
-fn read_npy(path: &Path) -> Result<(Vec<usize>, Vec<u8>), String> {
-    let raw = std::fs::read(path).map_err(|e| format!("read npy {path:?}: {e}"))?;
-    if raw.len() < 10 || &raw[0..6] != b"\x93NUMPY" {
-        return Err("bad npy magic".into());
+/// 裁剪 2D 单通道到 (ch, cw)（左上角对齐）。
+fn crop_2d(src: &[f32], sw: usize, sh: usize, ch: usize, cw: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; ch * cw];
+    for y in 0..ch.min(sh) {
+        for x in 0..cw.min(sw) {
+            out[y * cw + x] = src[y * sw + x];
+        }
     }
-    let header_len = u16::from_le_bytes([raw[8], raw[9]]) as usize;
-    let header = String::from_utf8_lossy(&raw[10..10 + header_len]).to_string();
-    // 解析 shape
-    let shape_part = header
-        .split("'shape': (")
-        .nth(1)
-        .and_then(|s| s.split(')').next())
-        .unwrap_or("");
-    let shape: Vec<usize> = shape_part
-        .split(',')
-        .filter_map(|s| s.trim().parse().ok())
-        .collect();
-    let data = raw[10 + header_len..].to_vec();
-    Ok((shape, data))
+    out
 }
 
 /// 运行分割传感器（对应 Python `main()`）。
@@ -176,13 +160,9 @@ pub fn run(path: &Path, p: &SegmentParams) -> Result<Value, String> {
         .try_extract_tensor::<f32>()
         .map_err(|e| format!("ort extract: {e}"))?;
     let n = shape.num_elements();
-    let emb_bytes: Vec<u8> = emb_data[..n].iter().flat_map(|v| v.to_le_bytes()).collect();
 
-    // 2) 保存 embeddings → Python 解码助手
-    let tmp_dir = std::env::temp_dir();
-    let emb_path = tmp_dir.join(format!("vsd_emb_{}.npy", std::process::id()));
-    let mask_path = tmp_dir.join(format!("vsd_masks_{}.npy", std::process::id()));
-    write_npy(&emb_path, &[1, 256, 64, 64], &emb_bytes, "f4")?;
+    // 2) 纯 Rust 解码：prompt_encoder + mask_decoder（ONNX，替代 Python 回退）
+    let emb_data_f32: Vec<f32> = emb_data[..n].to_vec();
 
     // 提示：点或网格
     let (points, labels): (Vec<Vec<f64>>, Vec<i64>) = if !p.points.is_empty() {
@@ -211,66 +191,135 @@ pub fn run(path: &Path, p: &SegmentParams) -> Result<Value, String> {
         (pts, lbs)
     };
 
-    let req = json!({
-        "embeddings": emb_path.display().to_string(),
-        "image": path.display().to_string(),
-        "points": points,
-        "labels": labels,
-        "out_masks": mask_path.display().to_string(),
-    });
-    let out = std::process::Command::new(vsensor_python())
-        .arg(decoder_script())
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            child
-                .stdin
-                .take()
-                .unwrap()
-                .write_all(req.to_string().as_bytes())?;
-            child.wait_with_output()
-        })
-        .map_err(|e| format!("spawn decoder: {e}"))?;
-    let resp: Value =
-        serde_json::from_slice(&out.stdout).map_err(|e| format!("decoder 输出非 JSON: {e}"))?;
-    if !resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+    // 坐标缩放到 1024 空间（对应 SamPredictor.apply_coords）
+    let scale = 1024.0f64 / f64::from(w.max(h));
+    let neww = (f64::from(w) * scale + 0.5) as u32;
+    let newh = (f64::from(h) * scale + 0.5) as u32;
+
+    // 加载 prompt_encoder + mask_decoder
+    let pe_path = prompt_encoder_path();
+    let md_path = mask_decoder_path();
+    if !Path::new(&pe_path).exists() || !Path::new(&md_path).exists() {
         return Err(format!(
-            "decoder 失败: {}",
-            resp.get("error")
-                .and_then(|e| e.as_str())
-                .unwrap_or("unknown")
+            "decoder 模型不存在: {pe_path} / {md_path}（需先导出 mobile_sam_prompt_encoder/mask_decoder.onnx）"
         ));
     }
-    let _ = std::fs::remove_file(&emb_path);
+    let mut pe_sess = ort::session::Session::builder()
+        .map_err(|e| format!("ort builder: {e}"))?
+        .commit_from_file(&pe_path)
+        .map_err(|e| format!("ort load prompt_encoder: {e}"))?;
+    let mut md_sess = ort::session::Session::builder()
+        .map_err(|e| format!("ort builder: {e}"))?
+        .commit_from_file(&md_path)
+        .map_err(|e| format!("ort load mask_decoder: {e}"))?;
 
-    // 3) 读 masks → 后处理（逐 mask 提取实例，对应 Python 逐 prompt 循环）
-    let (mask_shape, mask_bytes) = read_npy(&mask_path)?;
-    let _ = std::fs::remove_file(&mask_path);
-    let scores: Vec<f64> = resp
-        .get("scores")
-        .and_then(|s| s.as_array())
-        .map(|a| a.iter().filter_map(|v| v.as_f64()).collect())
-        .unwrap_or_default();
-    let n_masks = if mask_shape.len() == 3 {
-        mask_shape[0]
-    } else {
-        1
+    // image_pe = prompt_encoder.get_dense_pe()（位置编码，与输入无关）
+    // prompt_encoder.onnx 第三个输出 image_pe
+    let image_pe: Vec<f32> = {
+        let dummy_pts = ort::value::Tensor::from_array((
+            [1usize, 1, 2],
+            vec![512.0f32, 512.0].into_boxed_slice(),
+        ))
+        .map_err(|e| format!("ort tensor: {e}"))?;
+        let dummy_lbl =
+            ort::value::Tensor::from_array(([1usize, 1], vec![1i64].into_boxed_slice()))
+                .map_err(|e| format!("ort tensor: {e}"))?;
+        let pe_out = pe_sess
+            .run(ort::inputs! { "points" => dummy_pts, "labels" => dummy_lbl })
+            .map_err(|e| format!("prompt_encoder run: {e}"))?;
+        let (pe_shape, pe_data) = pe_out[2]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| format!("ort extract: {e}"))?;
+        let pe_n = pe_shape.num_elements();
+        pe_data[..pe_n].to_vec() // (1,256,64,64)
     };
-    let (mh, mw) = if mask_shape.len() == 3 {
-        (mask_shape[1], mask_shape[2])
-    } else {
-        (mask_shape[0], mask_shape[1])
-    };
-    let mask_stride = mh * mw;
+
+    // 逐 prompt 解码（对应 Python 逐 prompt 循环）
+    let mut masks_out: Vec<Vec<bool>> = Vec::new();
+    let mut scores: Vec<f64> = Vec::new();
+    for pi in 0..points.len() {
+        // prompt_encoder：点 → sparse + dense
+        let sx = points[pi][0] * (f64::from(neww) / f64::from(w));
+        let sy = points[pi][1] * (f64::from(newh) / f64::from(h));
+        let lb = if pi < labels.len() { labels[pi] } else { 1 };
+        let pt_t = ort::value::Tensor::from_array((
+            [1usize, 1, 2],
+            vec![sx as f32, sy as f32].into_boxed_slice(),
+        ))
+        .map_err(|e| format!("ort tensor: {e}"))?;
+        let lb_t = ort::value::Tensor::from_array(([1usize, 1], vec![lb].into_boxed_slice()))
+            .map_err(|e| format!("ort tensor: {e}"))?;
+        let pe_out = pe_sess
+            .run(ort::inputs! { "points" => pt_t, "labels" => lb_t })
+            .map_err(|e| format!("prompt_encoder run: {e}"))?;
+        let (s_shape, s_data) = pe_out[0]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| format!("ort extract: {e}"))?;
+        let s_n = s_shape.num_elements();
+        let sparse: Vec<f32> = s_data[..s_n].to_vec(); // (1,2,256)
+        let (d_shape, d_data) = pe_out[1]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| format!("ort extract: {e}"))?;
+        let d_n = d_shape.num_elements();
+        let dense: Vec<f32> = d_data[..d_n].to_vec(); // (1,256,64,64)
+
+        // mask_decoder：embeddings + image_pe + sparse + dense → masks + iou
+        let emb_t = ort::value::Tensor::from_array((
+            [1usize, 256, 64, 64],
+            emb_data_f32.clone().into_boxed_slice(),
+        ))
+        .map_err(|e| format!("ort tensor: {e}"))?;
+        let pe_t = ort::value::Tensor::from_array((
+            [1usize, 256, 64, 64],
+            image_pe.clone().into_boxed_slice(),
+        ))
+        .map_err(|e| format!("ort tensor: {e}"))?;
+        let sp_t = ort::value::Tensor::from_array(([1usize, 2, 256], sparse.into_boxed_slice()))
+            .map_err(|e| format!("ort tensor: {e}"))?;
+        let dn_t =
+            ort::value::Tensor::from_array(([1usize, 256, 64, 64], dense.into_boxed_slice()))
+                .map_err(|e| format!("ort tensor: {e}"))?;
+        let md_out = md_sess
+            .run(ort::inputs! {
+                "image_embeddings" => emb_t,
+                "image_pe" => pe_t,
+                "sparse_embeddings" => sp_t,
+                "dense_embeddings" => dn_t,
+            })
+            .map_err(|e| format!("mask_decoder run: {e}"))?;
+        let (m_shape, m_data) = md_out[0]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| format!("ort extract: {e}"))?;
+        let m_n = m_shape.num_elements();
+        let masks_raw: Vec<f32> = m_data[..m_n].to_vec(); // (1,1,256,256)
+        let (i_shape, i_data) = md_out[1]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| format!("ort extract: {e}"))?;
+        let i_n = i_shape.num_elements();
+        let iou: f64 = i_data[..i_n].iter().copied().fold(0.0f32, |a, b| a + b) as f64;
+        scores.push(iou);
+
+        // postprocess_masks：1024×1024 → 裁剪 input_size → 原图尺寸（bilinear）
+        // 注意：bilinear_resize_2d 参数为 (src, sw=宽度, sh=高度, dw=宽度, dh=高度)
+        let mask_1024 = bilinear_resize_2d(&masks_raw, 256, 256, 1024, 1024);
+        let mask_crop = crop_2d(&mask_1024, 1024, 1024, newh as usize, neww as usize);
+        let mask_orig = bilinear_resize_2d(
+            &mask_crop,
+            neww as usize,
+            newh as usize,
+            w as usize,
+            h as usize,
+        );
+        // masks > 0 → bool
+        masks_out.push(mask_orig.iter().map(|&v| v > 0.0).collect());
+    }
+
+    // 3) 后处理（逐 mask 提取实例，对应 Python 逐 prompt 循环）
+    let (_mh, mw) = (h as usize, w as usize);
+    let n_masks = masks_out.len();
     let mut instances: Vec<Value> = Vec::new();
     for mi in 0..n_masks {
-        let mask: Vec<bool> = mask_bytes[mi * mask_stride..(mi + 1) * mask_stride]
-            .iter()
-            .map(|b| *b != 0)
-            .collect();
+        let mask = &masks_out[mi];
         let mut ys: Vec<usize> = Vec::new();
         let mut xs: Vec<usize> = Vec::new();
         for (i, &m) in mask.iter().enumerate() {
@@ -411,14 +460,16 @@ mod tests {
     }
 
     #[test]
-    fn npy_roundtrip() {
-        let path = std::env::temp_dir().join("vsd_npy_test.npy");
-        let data: Vec<u8> = vec![1u8, 2, 3, 4];
-        write_npy(&path, &[2, 2], &data, "f4").unwrap();
-        let (shape, out) = read_npy(&path).unwrap();
-        assert_eq!(shape, vec![2, 2]);
-        assert_eq!(out, data);
-        std::fs::remove_file(&path).ok();
+    fn bilinear_resize_roundtrip() {
+        // 2×2 → 4×4 双线性 resize（torch interpolate 语义）
+        let src = vec![0.0f32, 1.0, 1.0, 0.0];
+        let out = bilinear_resize_2d(&src, 2, 2, 4, 4);
+        assert_eq!(out.len(), 16);
+        // 中心像素（双线性插值 0.375）
+        assert!((out[5] - 0.375).abs() < 0.01);
+        // 裁剪
+        let cropped = crop_2d(&out, 4, 4, 2, 2);
+        assert_eq!(cropped.len(), 4);
     }
 
     #[test]

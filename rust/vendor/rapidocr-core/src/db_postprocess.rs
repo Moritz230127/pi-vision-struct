@@ -231,13 +231,13 @@ impl Component {
         unclip_ratio: f32,
     ) -> Option<Quad> {
         // OpenCV contour extraction is replaced with boundary-pixel center
-        // samples (cv2.findContours 返回像素中心坐标，minAreaRect 对其求最小外接矩形)。
+        // samples (cv2.findContours 返回整数像素中心坐标，minAreaRect 对其求最小外接矩形)。
         let mut boundary = Vec::new();
         for &(x, y) in &self.pixels {
             if !is_boundary(mask, x, y, width, height) {
                 continue;
             }
-            boundary.push(Point::new(x as f32 + 0.5, y as f32 + 0.5));
+            boundary.push(Point::new(x as f32, y as f32));
         }
 
         if boundary.len() < 3 {

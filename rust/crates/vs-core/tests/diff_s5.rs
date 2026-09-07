@@ -3,20 +3,12 @@
 //! 流程：`rust/tests/gen_s5_golden.py` 生成 golden（Python 基线），
 //! 本测试用 Rust 计算同组输入并对比。
 //!
-//! 门禁（plan）：CER=0（文本精确匹配）+ bbox IoU ≥ 0.95。
+//! 门禁（plan2 P2 收紧后）：CER=0（文本精确匹配）+ bbox IoU = 1.0 + conf ±0.01。
 //!
-//! ## 已知 parity 差距（rapidocr-core crate vs Python rapidocr，2026-09 实测）
-//!
-//! 1. **det 分数差距**（s02_overlap）：crate 的 `polygon_score_fast` 用 scanline
-//!    近似，Python 用 `cv2.fillPoly` 掩码光栅化——小多边形上分数系统性低 ~0.1，
-//!    导致 box_thresh=0.5 时漏检（golden 1 元素 "A"，Rust 0）。修复方向：
-//!    自定义 DB postprocess 或降低 box_thresh。
-//! 2. **det 框几何差距**（s03/s04）：crate 的 unclip/min_area_rect 产生的框
-//!    系统性大 ~3px，bbox IoU 0.74-0.90（plan 目标 0.95 待 crate 修复后收紧）。
-//!    文本全部精确匹配（CER=0）。
-//!
-//! 因此本测试：CER=0 严格断言；bbox IoU 阈值 0.7（当前 crate 实际 parity）；
-//! s02 的漏检作为已知差距显式断言（不静默跳过）。
+//! 修复记录（2026-09）：
+//! 1. det 分数：BGR 输入 + fillPoly 等价光栅化（s02 漏检修复）
+//! 2. det 框几何：boundary 像素中心（cv2.findContours 等价）+ geo-clipper
+//!    round-join（pyclipper JT_ROUND 等价）→ 全部 IoU 1.0
 
 use std::path::PathBuf;
 
@@ -100,7 +92,7 @@ fn assert_structure(a: &Value, b: &Value, path: &str) {
 
 /// 元素配对比较：对每个 Python 元素找 Rust 中 IoU 最大的元素。
 /// 断言：文本 CER=0（精确匹配）+ bbox IoU ≥ 阈值 + conf 容差 0.05。
-fn assert_elements_paired(py_els: &[Value], rs_els: &[Value], path: &str, iou_th: f64) {
+fn assert_elements_paired(py_els: &[Value], rs_els: &[Value], path: &str, _iou_th: f64) {
     assert_eq!(
         py_els.len(),
         rs_els.len(),
@@ -134,21 +126,21 @@ fn assert_elements_paired(py_els: &[Value], rs_els: &[Value], path: &str, iou_th
         let (j, iou) = best.expect("no Rust element to pair");
         used_rs[j] = true;
         let re = &rs_els[j];
-        // 门禁 1：bbox IoU ≥ 阈值（当前 crate parity 0.7；plan 目标 0.95 待修复）
+        // 门禁 1：bbox IoU = 1.0（boundary 像素中心 + geo-clipper round-join 修复后）
         assert!(
-            iou >= iou_th,
-            "{p}: bbox IoU {iou} < {iou_th} (py {pb:?} vs rs {:?})",
+            iou >= 1.0,
+            "{p}: bbox IoU {iou} < 1.0 (py {pb:?} vs rs {:?})",
             re.get("bbox")
         );
         // 门禁 2：CER=0（文本精确匹配）
         let pt = pe.get("text").and_then(|v| v.as_str()).unwrap_or("");
         let rt = re.get("text").and_then(|v| v.as_str()).unwrap_or("");
         assert_eq!(pt, rt, "{p}: text mismatch (CER>0)");
-        // conf 容差 0.3（bbox 几何差 → crop 不同 → rec 分数差；已知差距的连带影响）
+        // conf 容差 0.01（bbox 一致 → crop 一致 → rec 分数一致）
         let pc = pe.get("conf").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let rc = re.get("conf").and_then(|v| v.as_f64()).unwrap_or(0.0);
         assert!(
-            (pc - rc).abs() <= 0.3,
+            (pc - rc).abs() <= 0.01,
             "{p}: conf {pc} != {rc} (diff {})",
             (pc - rc).abs()
         );
@@ -202,8 +194,7 @@ fn ocr_matches_python() {
         assert_structure(golden, &r, &format!("{key}.ocr"));
         let ge = golden["elements"].as_array().unwrap();
         let re = r["elements"].as_array().unwrap();
-        // 元素配对：CER=0 + bbox IoU ≥ 阈值
-        // （BGR 输入 + fillPoly 等价 + unclip 1.4 修复后：s02 IoU 1.0，s03 部分 1.0，s04 0.86-0.89）
-        assert_elements_paired(ge, re, &format!("{key}.ocr.elements"), 0.85);
+        // 元素配对：CER=0 + bbox IoU = 1.0（boundary 像素中心 + geo-clipper 修复后）
+        assert_elements_paired(ge, re, &format!("{key}.ocr.elements"), 1.0);
     }
 }

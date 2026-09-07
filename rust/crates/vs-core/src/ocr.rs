@@ -125,10 +125,10 @@ pub fn run(path: &Path, p: &OcrParams) -> Result<Value, String> {
         ));
     }
     let mut cfg = rapidocr_core::config::RapidOcrConfig::ppocr_v6_small(&dir);
-    // unclip_ratio 1.6→1.4：Rust 凸偏移（miter）比 pyclipper round-join 膨胀更多，
-    // 调低后 box 与 Python 一致（实测 s03 btn2/btn3 完全匹配）。
+    // unclip_ratio 1.6（Python 默认）：round-join（geo-clipper）与 pyclipper 一致，
+    // 无需再像 miter 偏移那样调低。
     if let Some(det) = cfg.det.as_mut() {
-        det.unclip_ratio = 1.4;
+        det.unclip_ratio = 1.6;
     }
     let mut engine =
         rapidocr_core::RapidOcr::new(cfg).map_err(|e| format!("rapidocr init: {e}"))?;

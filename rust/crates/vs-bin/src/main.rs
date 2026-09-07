@@ -408,7 +408,11 @@ fn main() {
             },
         )
         .unwrap_or_else(|e| json!({"error": "vs_detect failed", "detail": e})),
-        Command::Wall { dir, colors, max_files } => wall::run(
+        Command::Wall {
+            dir,
+            colors,
+            max_files,
+        } => wall::run(
             &dir,
             &wall::WallParams {
                 colors,

@@ -84,7 +84,48 @@ pub(crate) fn unclip_quad(quad: &Quad, unclip_ratio: f32) -> Option<Vec<Point>> 
     // DBPostProcess expands text polygons by area * ratio / perimeter, matching
     // the pyclipper distance formula used by the Python implementation.
     let distance = area * unclip_ratio / perimeter;
-    offset_convex_polygon(&points, distance)
+    offset_round_join(&points, distance)
+}
+
+/// pyclipper `JT_ROUND` 等价实现（geo-clipper，Clipper 6.4.2 移植）。
+///
+/// Python 侧 `pyclipper.PyclipperOffset()` 默认 `arcTolerance=0.25`，
+/// `AddPath(box, JT_ROUND, ET_CLOSEDPOLYGON)` + `Execute(distance)`。
+/// geo-clipper 的 `JoinType::Round(0.25)` 与 pyclipper 输出逐点一致（实测）。
+fn offset_round_join(points: &[Point], distance: f32) -> Option<Vec<Point>> {
+    use geo_clipper::{ClipperInt, EndType, JoinType};
+    use geo_types::{Coord, LineString, Polygon};
+
+    if points.len() < 3 {
+        return None;
+    }
+    // 整数坐标（Clipper 内部整数运算；pyclipper 同样先 round 到 IntPoint）
+    let ring: Vec<Coord<i64>> = points
+        .iter()
+        .map(|p| Coord {
+            x: p.x.round() as i64,
+            y: p.y.round() as i64,
+        })
+        .collect();
+    let mut ls = LineString::from(ring);
+    ls.close();
+    let poly = Polygon::new(ls, vec![]);
+    let out = poly.offset(
+        distance as f64,
+        JoinType::Round(0.25), // pyclipper 默认 arcTolerance
+        EndType::ClosedPolygon,
+    );
+    let mut result = Vec::new();
+    for p in out.iter() {
+        for pt in p.exterior().0.iter() {
+            result.push(Point::new(pt.x as f32, pt.y as f32));
+        }
+    }
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
 }
 
 pub(crate) fn polygon_area(points: &[Point]) -> f32 {
@@ -119,6 +160,7 @@ fn signed_polygon_area(points: &[Point]) -> f32 {
     area * 0.5
 }
 
+#[allow(dead_code)]
 fn offset_convex_polygon(points: &[Point], distance: f32) -> Option<Vec<Point>> {
     if points.len() < 3 {
         return None;
@@ -216,6 +258,7 @@ fn distance(a: Point, b: Point) -> f32 {
     (dx * dx + dy * dy).sqrt()
 }
 
+#[allow(dead_code)]
 fn line_intersection(a0: Point, a1: Point, b0: Point, b1: Point) -> Option<Point> {
     let r = Point::new(a1.x - a0.x, a1.y - a0.y);
     let s = Point::new(b1.x - b0.x, b1.y - b0.y);

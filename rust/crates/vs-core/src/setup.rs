@@ -11,19 +11,40 @@ use serde_json::{json, Value};
 pub const MODELS: &[(&str, &str)] = &[
     ("u2net.onnx", "saliency（U²-Net）"),
     ("midas_v21_small_256.onnx", "depth（MiDaS-small）"),
-    ("mobile_sam_encoder.onnx", "segment（MobileSAM image encoder）"),
+    (
+        "mobile_sam_encoder.onnx",
+        "segment（MobileSAM image encoder）",
+    ),
     ("mobile_sam.pt", "segment（MobileSAM 权重，decoder 回退）"),
     ("rapidocr/PP-OCRv6_det_small.onnx", "ocr（PP-OCRv6 det）"),
     ("rapidocr/PP-OCRv6_rec_small.onnx", "ocr（PP-OCRv6 rec）"),
-    ("rapidocr/ch_ppocr_mobile_v2.0_cls_mobile.onnx", "ocr（PP-OCRv6 cls）"),
-    ("florence2/vision_encoder.onnx", "omniparser（Florence-2 vision encoder）"),
-    ("florence2/language_encoder.onnx", "omniparser（Florence-2 language encoder）"),
+    (
+        "rapidocr/ch_ppocr_mobile_v2.0_cls_mobile.onnx",
+        "ocr（PP-OCRv6 cls）",
+    ),
+    (
+        "florence2/vision_encoder.onnx",
+        "omniparser（Florence-2 vision encoder）",
+    ),
+    (
+        "florence2/language_encoder.onnx",
+        "omniparser（Florence-2 language encoder）",
+    ),
     ("florence2/decoder.onnx", "omniparser（Florence-2 decoder）"),
-    ("florence2/embed_tokens.onnx", "omniparser（Florence-2 embed tokens）"),
+    (
+        "florence2/embed_tokens.onnx",
+        "omniparser（Florence-2 embed tokens）",
+    ),
     ("icon_detect.onnx", "omniparser（YOLOv9 icon detect）"),
     ("owlv2/text_encoder.onnx", "detect（OWLv2 text encoder）"),
-    ("owlv2/vision_encoder.onnx", "detect（OWLv2 vision encoder）"),
-    ("owlv2/detection_head.onnx", "detect（OWLv2 detection head）"),
+    (
+        "owlv2/vision_encoder.onnx",
+        "detect（OWLv2 vision encoder）",
+    ),
+    (
+        "owlv2/detection_head.onnx",
+        "detect（OWLv2 detection head）",
+    ),
 ];
 
 /// 模型目录（与 Python `WEIGHTS` 一致）。
@@ -40,10 +61,7 @@ pub fn check() -> Value {
     for (name, desc) in MODELS {
         let p = Path::new(&dir).join(name);
         let ok = p.exists();
-        models.insert(
-            name.replace('/', "_"),
-            json!({"exists": ok, "desc": desc}),
-        );
+        models.insert(name.replace('/', "_"), json!({"exists": ok, "desc": desc}));
         if !ok {
             missing.push(name.to_string());
         }

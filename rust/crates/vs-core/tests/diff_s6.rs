@@ -110,7 +110,8 @@ fn assert_json_eq(a: &Value, b: &Value, path: &str) {
 }
 
 /// 元素匹配：Python 每元素在 Rust 中找最大 IoU 匹配（≥ 0.9）。
-/// caption 断言非空 + 长度相似。返回 (匹配数, Python 元素数)。
+/// caption 逐 token 一致（Florence-2 修复后：prompt 替换 + 768×768 预处理 +
+/// cv2 双线性 + forced_eos，与 Python 生成完全一致）。返回 (匹配数, Python 元素数)。
 fn assert_elements_matched(py_els: &[Value], rust_els: &[Value], path: &str) -> (usize, usize) {
     let mut matched = 0usize;
     for (i, pe) in py_els.iter().enumerate() {
@@ -138,19 +139,11 @@ fn assert_elements_matched(py_els: &[Value], rust_els: &[Value], path: &str) -> 
             "{p}: 无 Rust 匹配（max IoU {best_iou} < 0.9，bbox {pb:?}）"
         );
         matched += 1;
-        // caption：非空 + 长度相似（Florence-2 ort vs transformers 生成差异）
+        // caption：逐 token 一致（Florence-2 修复后与 Python 生成完全一致）
         let re = &rust_els[best_idx.unwrap()];
         let pc = pe.get("text").and_then(|v| v.as_str()).unwrap_or("");
         let rc = re.get("text").and_then(|v| v.as_str()).unwrap_or("");
-        assert!(!rc.is_empty(), "{p}: Rust caption 为空");
-        assert!(!pc.is_empty(), "{p}: Python caption 为空");
-        let dl = (rc.chars().count() as i64 - pc.chars().count() as i64).abs();
-        // Florence-2 生成差异：长度容差放宽（|Δlen| ≤ max(20, len_py)）
-        let tol = (pc.chars().count() as i64).max(20);
-        assert!(
-            dl <= tol,
-            "{p}: caption 长度差异过大 {dl} > {tol}（py={pc:?} rust={rc:?}）"
-        );
+        assert_eq!(pc, rc, "{p}: caption 不一致（py={pc:?} rust={rc:?}）");
     }
     (matched, py_els.len())
 }
