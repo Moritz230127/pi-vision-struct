@@ -74,10 +74,21 @@ pub fn apply_landlock(cfg: &SandboxConfig) -> Result<bool, String> {
 /// 默认禁止：execve / execveat / ptrace / process_vm_writev / kexec_load。
 /// `allow_exec` 为 true 时放行 execve（沙箱内子进程场景）。
 pub fn apply_seccomp(allow_exec: bool) -> Result<(), String> {
-    use seccompiler::{BpfProgram, SeccompAction, SeccompFilter, SeccompRule, TargetArch};
+    use seccompiler::{
+        BpfProgram, SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter,
+        SeccompRule, TargetArch,
+    };
     let arch = TargetArch::x86_64;
-    // 禁止的系统调用 → Errno(EPERM)；空条件 = 匹配任意参数（无条件拦截）
-    let deny = SeccompRule::new(vec![]).map_err(|e| format!("seccomp rule: {e}"))?;
+    // 禁止的系统调用 → Errno(EPERM)；恒真条件（arg0 >= 0）实现无条件拦截
+    // （seccompiler 0.5 不允许空条件向量）
+    let deny = SeccompRule::new(vec![SeccompCondition::new(
+        0,
+        SeccompCmpArgLen::Dword,
+        SeccompCmpOp::Ge,
+        0,
+    )
+    .map_err(|e| format!("seccomp condition: {e}"))?])
+    .map_err(|e| format!("seccomp rule: {e}"))?;
     let mut rules = std::collections::BTreeMap::new();
     let syscalls: [(&str, i64); 5] = [
         ("execve", libc::SYS_execve),

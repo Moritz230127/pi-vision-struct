@@ -13,6 +13,7 @@ use clap::Parser;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use vsd::preflight;
+use vsd::sandbox::{self, SandboxConfig};
 use vsd::scheduler::{self, Scheduler};
 
 /// 默认 socket 路径（与 Python vsd.py 一致）。
@@ -22,7 +23,7 @@ const DEFAULT_SOCKET: &str = "/tmp/vsd.sock";
 #[command(
     name = "vsd",
     version,
-    about = "V4 常驻视觉 daemon（调度器 + unix socket）"
+    about = "V4 常驻视觉 daemon（调度器 + unix socket + 沙箱）"
 )]
 struct Cli {
     /// unix socket 路径
@@ -34,6 +35,9 @@ struct Cli {
     /// 推理超时（秒）
     #[arg(long, default_value_t = 120.0)]
     timeout: f64,
+    /// 沙箱（landlock + seccomp + namespace；默认开启）
+    #[arg(long, default_value_t = true)]
+    sandbox: bool,
 }
 
 #[tokio::main]
@@ -42,6 +46,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // preflight：环境检查（socket 目录 / 权限 / 设备）
     preflight::run(&cli.socket, &cli.device)?;
+
+    // 沙箱：landlock + seccomp + namespace（推理路径全程沙箱化）
+    if cli.sandbox {
+        let cfg = SandboxConfig::default();
+        match sandbox::apply(&cfg) {
+            Ok(()) => println!("[vsd] sandbox applied (landlock + seccomp + namespace)"),
+            Err(e) => {
+                // 沙箱失败不阻断（无 CAP_SYS_ADMIN 环境降级），但记录
+                eprintln!("[vsd] sandbox warning: {e}");
+            }
+        }
+    }
 
     // 清理残留 socket（崩溃后重启）
     let _ = std::fs::remove_file(&cli.socket);

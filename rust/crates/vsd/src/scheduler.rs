@@ -95,7 +95,7 @@ pub struct Task {
 pub type InferFn =
     Box<dyn Fn(&str, &serde_json::Value, bool) -> Result<serde_json::Value, String> + Send + Sync>;
 
-/// 功耗监视器：检测电源状态（battery/plugged）。
+/// 功耗监视器：检测电源状态（battery/plugged/low-power）+ CPU 频率。
 pub struct PowerMonitor {
     mode: Mutex<String>,
     poll_interval: u64,
@@ -121,18 +121,29 @@ impl PowerMonitor {
         m
     }
 
-    /// 检测电源状态。Linux: /sys/class/power_supply/BAT*/status。
-    fn detect() -> String {
+    /// 检测电源状态。Linux: /sys/class/power_supply/BAT*/status + capacity。
+    /// 返回档位：plugged（充电/满电/无电池）/ battery（放电）/ low-power（放电 + 低电量 <20%）。
+    pub fn detect() -> String {
+        let mut battery = false;
+        let mut capacity: Option<u32> = None;
         if let Ok(entries) = std::fs::read_dir("/sys/class/power_supply") {
             for e in entries.flatten() {
                 let name = e.file_name();
                 let name = name.to_string_lossy();
                 if name.starts_with("BAT") {
+                    battery = true;
                     let status_path = e.path().join("status");
                     if let Ok(status) = std::fs::read_to_string(status_path) {
                         let status = status.trim();
                         if status == "Discharging" {
-                            return "battery".to_string();
+                            // 读取电量（低电量 → low-power）
+                            if let Ok(cap) = std::fs::read_to_string(e.path().join("capacity")) {
+                                capacity = cap.trim().parse::<u32>().ok();
+                            }
+                            return match capacity {
+                                Some(c) if c < 20 => "low-power".to_string(),
+                                _ => "battery".to_string(),
+                            };
                         }
                         if status == "Charging" || status == "Full" {
                             return "plugged".to_string();
@@ -141,11 +152,34 @@ impl PowerMonitor {
                 }
             }
         }
+        let _ = battery;
         "plugged".to_string() // 无电池 → 视为 plugged
     }
 
+    /// 当前 CPU 频率（MHz）。读取 /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq。
+    pub fn cpu_freq_mhz(&self) -> Option<u64> {
+        let path = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq";
+        std::fs::read_to_string(path)
+            .ok()?
+            .trim()
+            .parse::<u64>()
+            .ok()
+            .map(|khz| khz / 1000)
+    }
+
     pub fn is_battery(&self) -> bool {
-        *self.mode.lock().unwrap() == "battery"
+        let m = self.mode.lock().unwrap();
+        *m == "battery" || *m == "low-power"
+    }
+
+    /// 低功耗模式（battery + 电量 <20%）：所有模型 CPU 降级。
+    pub fn is_low_power(&self) -> bool {
+        *self.mode.lock().unwrap() == "low-power"
+    }
+
+    /// 当前档位（供 stats 输出）。
+    pub fn mode(&self) -> String {
+        self.mode.lock().unwrap().clone()
     }
 }
 
@@ -295,9 +329,11 @@ impl Scheduler {
                 vram_peak: 1.0,
                 cpu_ok: true,
             });
-        // 功耗模式：battery → 大模型 CPU 降级
+        // 功耗模式：low-power → 所有模型 CPU 降级；battery → 大模型 CPU 降级
         let mut use_gpu = task.device == "cuda";
-        if self.power.is_battery() && budget.vram_reserve >= 1.0 {
+        if self.power.is_low_power()
+            || (self.power.is_battery() && budget.vram_reserve >= 1.0)
+        {
             use_gpu = false;
             self.stats.lock().unwrap().cpu_fallback += 1;
         }
@@ -407,7 +443,8 @@ impl Scheduler {
             "cpu_fallback": s.cpu_fallback,
             "oom_avoided": s.oom_avoided,
             "timeouts": s.timeouts,
-            "mode": if self.power.is_battery() { "battery" } else { "plugged" },
+            "mode": self.power.mode(),
+            "cpu_freq_mhz": self.power.cpu_freq_mhz(),
             "vram_used": (vram * 100.0).round() / 100.0,
             "loaded_models": loaded,
             "queue_depth": qlen,

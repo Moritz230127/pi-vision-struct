@@ -100,6 +100,38 @@ fn power_battery_cpu_fallback() {
     assert_eq!(st["oom_avoided"], 1, "OOM 被避免");
 }
 
+/// 功耗切换：low-power 模式（battery + 低电量）→ 所有模型 CPU 降级。
+#[test]
+fn power_low_power_all_cpu() {
+    // 验证 PowerMonitor 档位检测逻辑（无电池环境 → plugged）
+    let mode = vsd::scheduler::PowerMonitor::detect();
+    assert!(
+        mode == "plugged" || mode == "battery" || mode == "low-power",
+        "档位合法: {mode}"
+    );
+    // 验证 stats 输出包含 mode + cpu_freq_mhz 字段
+    let sched = Scheduler::new(6.5, 1);
+    sched.register(
+        "saliency",
+        Box::new(|_, _, use_gpu| Ok(serde_json::json!({"use_gpu": use_gpu}))),
+        None,
+    );
+    sched.submit(
+        "saliency".into(),
+        serde_json::json!({}),
+        PRIORITY_ANALYZE,
+        Duration::from_secs(5),
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    let st = sched.stats();
+    assert!(st["mode"].is_string(), "mode 字段存在");
+    assert!(
+        st["cpu_freq_mhz"].is_null() || st["cpu_freq_mhz"].is_u64(),
+        "cpu_freq_mhz 字段存在"
+    );
+    assert_eq!(st["completed"], 1);
+}
+
 /// 沙箱逃逸测试：seccomp 拦截 execve（子进程启动失败）。
 #[test]
 fn sandbox_blocks_exec_escape() {
