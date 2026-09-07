@@ -33,7 +33,7 @@
 
 实测 s03_alignment.png：同一按钮被 ocr + omniparser 同时检测：
 
-```
+```text
 ocr        [3] btn4 bbox=[113,324,140,340] conf=0.999
 omniparser [2] A blank page bbox=[107,321,308,370] conf=None
 ```
@@ -75,7 +75,7 @@ omniparser [2] A blank page bbox=[107,321,308,370] conf=None
 
 ### 3.1 数据流（新增 EFL，位于传感器与协议之间）
 
-```
+```text
 ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
 │  ocr        │   │ omniparser  │   │ detect      │
 │  (文本)     │   │ (图标语义)  │   │ (类别)      │
@@ -114,7 +114,7 @@ omniparser [2] A blank page bbox=[107,321,308,370] conf=None
   "sources": ["ocr", "omniparser"],
   "interactive": true
 }
-```
+```text
 
 **关键**：DeepSeek 只需读这一份清单——文本、语义、类别、置信度、来源全部合并。
 
