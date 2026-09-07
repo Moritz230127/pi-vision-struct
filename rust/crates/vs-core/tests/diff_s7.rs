@@ -17,7 +17,7 @@ fn load_golden(name: &str) -> Value {
     serde_json::from_str(&s).expect("golden JSON 解析失败")
 }
 
-/// pdf：文本逐字段一致 + bbox 容差（pdfium vs PyMuPDF 引擎差异 ±5pt）。
+/// pdf：文本逐字段一致 + bbox 容差（pdfium vs PyMuPDF 引擎差异 ±1pt）。
 #[test]
 fn pdf_matches_python() {
     let golden = load_golden("pdf_golden.json");
@@ -49,8 +49,8 @@ fn pdf_matches_python() {
         for k in 0..4 {
             let diff = (rb[k].as_f64().unwrap() - gb[k].as_f64().unwrap()).abs();
             assert!(
-                diff <= 5.0,
-                "bbox[{k}] 容差 ±5pt: rust={} golden={}",
+                diff <= 1.0,
+                "bbox[{k}] 容差 ±1pt: rust={} golden={}",
                 rb[k],
                 gb[k]
             );
@@ -96,7 +96,7 @@ fn pptx_matches_python() {
     }
 }
 
-/// blend：对象数/名称/类型/tris 一致 + bbox3d 容差（blend-rs vs bpy）。
+/// blend：对象数/名称/类型/tris 一致 + bbox3d 容差（blend-rs vs bpy ±0.001）。
 #[test]
 fn blend_matches_python() {
     let golden = load_golden("blend_golden.json");
@@ -126,7 +126,7 @@ fn blend_matches_python() {
             .unwrap_or_else(|| panic!("Rust 缺对象 {gname}"));
         assert_eq!(r["type"], g["type"], "对象类型一致");
         assert_eq!(r["tris"], g["tris"], "面数一致");
-        // bbox3d 容差（blend-rs 顶点 vs bpy bound_box）
+        // bbox3d 容差（blend-rs 顶点 vs bpy bound_box，±0.001）
         let rb = r["bbox3d"].as_array().unwrap();
         let gb = g["bbox3d"].as_array().unwrap();
         assert_eq!(rb.len(), gb.len(), "bbox3d 角点数一致");
@@ -136,8 +136,8 @@ fn blend_matches_python() {
             for k in 0..3 {
                 let diff = (rv[k].as_f64().unwrap() - gv[k].as_f64().unwrap()).abs();
                 assert!(
-                    diff <= 0.01,
-                    "bbox3d[{k}] 容差 0.01: rust={} golden={}",
+                    diff <= 0.001,
+                    "bbox3d[{k}] 容差 0.001: rust={} golden={}",
                     rv[k],
                     gv[k]
                 );

@@ -10,8 +10,10 @@
 //! - [`util`]：Python 兼容的取整等基础工具
 
 pub mod a11y;
+pub mod analyze;
 pub mod ascii;
 pub mod audit;
+pub mod audit3d;
 pub mod bbox;
 pub mod blend;
 pub mod capture;
@@ -30,6 +32,7 @@ pub mod omniparser;
 pub mod pdf;
 pub mod pix;
 pub mod pptx;
+pub mod protocol;
 pub mod rules;
 pub mod saliency;
 pub mod scene_stats;

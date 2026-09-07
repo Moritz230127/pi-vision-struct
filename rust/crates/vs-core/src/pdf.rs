@@ -93,41 +93,70 @@ pub fn run(p: &PdfParams) -> Result<Value, String> {
         let text = page.text().map_err(|e| format!("pdfium text {pno}: {e}"))?;
         let chars = text.chars();
         let n = chars.len();
-        // 逐字符收集（origin + 字符 + 字号）
-        let mut raw: Vec<(f32, f32, f32, String)> = Vec::new();
+        // 逐字符收集（origin + 字符 + 字号 + loose bounds）
+        // (x, y, font_size, text, loose_l, loose_b, loose_r, loose_t)
+        type CharRec = (f32, f32, f32, String, f32, f32, f32, f32);
+        let mut raw: Vec<CharRec> = Vec::new();
         for i in 0..n {
             let ch = chars.get(i).map_err(|e| format!("pdfium char {i}: {e}"))?;
             let (x, y) = ch.origin().map_err(|e| format!("pdfium origin {i}: {e}"))?;
             if let Some(s) = ch.unicode_string() {
+                if s == "\r" || s == "\n" {
+                    continue; // 行尾伪字符（pdfium 生成），PyMuPDF 不含
+                }
                 let fs = ch.scaled_font_size().value;
-                raw.push((x.value, y.value, fs, s));
+                // loose bounds（bottom 原点）：PyMuPDF span bbox 的 x0/x1/y1 来源
+                let lb = ch
+                    .loose_bounds()
+                    .map_err(|e| format!("pdfium bounds {i}: {e}"))?;
+                raw.push((
+                    x.value,
+                    y.value,
+                    fs,
+                    s,
+                    lb.left().value,
+                    lb.bottom().value,
+                    lb.right().value,
+                    lb.top().value,
+                ));
             }
         }
         // 按行聚合：y 相近（≤ 2pt）归一行，行内按 x 排序合并
-        type Line = (f32, f32, f32, Vec<(f32, String)>);
+        type Line = (f32, f32, Vec<(f32, String, f32, f32, f32, f32)>);
         let mut lines: Vec<Line> = Vec::new();
-        for (x, y, fs, s) in raw {
+        for (x, y, fs, s, l, b, r, t) in raw {
             if let Some(line) = lines.iter_mut().find(|l| (l.0 - y).abs() <= 2.0) {
-                line.1 = line.1.max(y);
-                line.2 = line.2.max(fs);
-                line.3.push((x, s));
+                line.1 = line.1.max(fs);
+                line.2.push((x, s, l, b, r, t));
             } else {
-                lines.push((y, y, fs, vec![(x, s)]));
+                lines.push((y, fs, vec![(x, s, l, b, r, t)]));
             }
         }
-        for (y0, _y1, font_size, mut items) in lines {
+        for (y0, font_size, mut items) in lines {
             items.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-            let text_str: String = items.iter().map(|(_, s)| s.as_str()).collect();
+            let text_str: String = items.iter().map(|(_, s, _, _, _, _)| s.as_str()).collect();
             let text_str = text_str.trim().to_string();
             if text_str.is_empty() {
                 continue;
             }
-            let x0 = items.first().map(|(x, _)| *x).unwrap_or(0.0);
-            let x1 = items.last().map(|(x, _)| *x).unwrap_or(0.0);
-            // 行高 = 字号（PyMuPDF blocks 的 y1 含行高）
-            let y1 = y0 + font_size;
+            // PyMuPDF span bbox 对齐：
+            //   x0 = min loose left；x1 = max loose right
+            //   y0 = baseline + 字号（顶部原点，PyMuPDF ascender≈1.0×字号）
+            //   y1 = min loose bottom（底部原点，PyMuPDF descender 来源）
+            let x0 = items
+                .iter()
+                .map(|(_, _, l, _, _, _)| *l)
+                .fold(f32::MAX, f32::min);
+            let x1 = items
+                .iter()
+                .map(|(_, _, _, _, r, _)| *r)
+                .fold(f32::MIN, f32::max);
+            let y1_bottom = items
+                .iter()
+                .map(|(_, _, _, b, _, _)| *b)
+                .fold(f32::MAX, f32::min);
             // y 翻转：pdfium 顶部原点 → PyMuPDF 底部原点
-            let (py0, py1) = (page_h - y1, page_h - y0);
+            let (py0, py1) = (page_h - (y0 + font_size), page_h - y1_bottom);
             els.push(json!({
                 "id": els.len(),
                 "type": "text",

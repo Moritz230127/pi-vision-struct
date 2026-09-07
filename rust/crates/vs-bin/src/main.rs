@@ -9,8 +9,9 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use serde_json::json;
 use vs_core::{
-    a11y, ascii, audit, blend, capture, cluster, depth, detect, dom, edge, fusion, geometry,
-    layout, ocr, omniparser, pdf, pix, pptx, rules, saliency, scene_stats, segment, setup, wall,
+    a11y, analyze, ascii, audit, audit3d, blend, capture, cluster, depth, detect, dom, edge,
+    fusion, geometry, layout, ocr, omniparser, pdf, pix, pptx, protocol, rules, saliency,
+    scene_stats, segment, setup, wall,
 };
 
 /// 数理化视觉套件 V4（全面 Rust 重写）。
@@ -230,6 +231,43 @@ enum Command {
         #[arg(long, default_value_t = 200)]
         max_files: u32,
     },
+    /// 任务引擎：按 JSON 配置编排传感器与融合算子。
+    Analyze {
+        #[arg(long)]
+        task: String,
+        #[arg(long)]
+        input: Option<String>,
+        #[arg(long)]
+        url: Option<String>,
+        #[arg(long)]
+        compare: Option<String>,
+        #[arg(long)]
+        prompt: Option<String>,
+        #[arg(long, default_value_t = 1.0)]
+        dpr: f64,
+    },
+    /// 多轮反馈协议：analyze / zoom / probe。
+    Protocol {
+        #[arg(long)]
+        action: String,
+        #[arg(long)]
+        image: PathBuf,
+        #[arg(long)]
+        region: Option<String>,
+        #[arg(long)]
+        bbox: Option<String>,
+        #[arg(long)]
+        sensor: Option<String>,
+    },
+    /// 三维装配审计（OBB-SAT + kd-tree 点云距离）。
+    Audit3d {
+        #[arg(long)]
+        report: String,
+        #[arg(long, default_value_t = 15.0)]
+        gap_threshold: f64,
+        #[arg(long, default_value = "auto")]
+        method: String,
+    },
     /// 只读健康检查（模型存在性 + 二进制完整性 + 环境检测）。
     Check,
     /// 安装引导（模型目录创建 + 下载 URL 提示）。
@@ -445,6 +483,46 @@ fn main() {
             },
         )
         .unwrap_or_else(|e| json!({"error": "vs_wall failed", "detail": e})),
+        Command::Analyze {
+            task,
+            input,
+            url,
+            compare,
+            prompt,
+            dpr,
+        } => analyze::run(&analyze::AnalyzeParams {
+            task,
+            input,
+            url,
+            compare,
+            prompt,
+            dpr,
+        })
+        .unwrap_or_else(|e| json!({"error": "vs_analyze failed", "detail": e})),
+        Command::Protocol {
+            action,
+            image,
+            region,
+            bbox,
+            sensor,
+        } => protocol::run(&protocol::ProtocolParams {
+            action,
+            image: image.to_string_lossy().into_owned(),
+            region,
+            bbox,
+            sensor,
+        })
+        .unwrap_or_else(|e| json!({"error": "vs_protocol failed", "detail": e})),
+        Command::Audit3d {
+            report,
+            gap_threshold,
+            method,
+        } => audit3d::run(&audit3d::Audit3dParams {
+            report,
+            gap_threshold,
+            method,
+        })
+        .unwrap_or_else(|e| json!({"error": "vs_audit3d failed", "detail": e})),
         Command::Check => setup::check(),
         Command::Setup => setup::setup(),
     };
