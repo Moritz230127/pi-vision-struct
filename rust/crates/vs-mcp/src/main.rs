@@ -3,14 +3,14 @@
 //! 细粒度工具：每传感器一个 tool（26 个），全部调用 vs-core 纯 Rust 实现。
 //! 仅 check/setup/env 保留 Python 回退（引导安装器无 Rust 对应物）。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::transport::stdio;
 use rmcp::{serve_server, tool, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use vs_core::a11y;
 use vs_core::analyze;
@@ -37,6 +37,7 @@ use vs_core::rules;
 use vs_core::saliency;
 use vs_core::scene_stats;
 use vs_core::segment;
+use vs_core::setup;
 use vs_core::wall;
 
 // ---- 工具参数结构（每传感器最小化）----
@@ -168,46 +169,6 @@ fn parse_region(s: Option<&str>) -> Option<[u32; 4]> {
     } else {
         None
     }
-}
-
-/// Python 回退：仅 check/setup/env（引导安装器无 Rust 对应物）。
-fn python_fallback(action: &str, extra: &serde_json::Map<String, Value>) -> Result<Value, String> {
-    let pkg_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .and_then(|p| p.parent())
-        .ok_or_else(|| "无法定位项目根".to_string())?;
-    let script = match action {
-        "env" => return Ok(json!({"note": "env 自检请用 /vs check"})),
-        "check" => "setup/vs_setup.py",
-        "setup" => "setup/vs_setup.py",
-        _ => return Err(format!("未知 action: {action}")),
-    };
-    let script_path = pkg_root.join("python").join(script);
-    if !script_path.exists() {
-        return Err(format!("Python 回退脚本不存在: {}", script_path.display()));
-    }
-    let mut args: Vec<String> = vec![script_path.to_string_lossy().into_owned()];
-    if action == "check" {
-        args.push("--check".into());
-    } else if let Some(sa) = extra.get("setup_args").and_then(|v| v.as_str()) {
-        args.extend(sa.split_whitespace().map(String::from));
-    }
-    let out = std::process::Command::new("python3")
-        .args(&args)
-        .output()
-        .map_err(|e| format!("python 回退失败: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "python 回退失败: {}",
-            String::from_utf8_lossy(&out.stderr)
-                .chars()
-                .take(300)
-                .collect::<String>()
-        ));
-    }
-    serde_json::from_str(&String::from_utf8_lossy(&out.stdout))
-        .map_err(|e| format!("python 输出解析失败: {e}"))
 }
 
 // ---- 工具定义（26 个细粒度工具）----
@@ -599,22 +560,22 @@ impl VsToolHandler {
         .map(Json)
     }
 
-    /// 环境自检（Python 回退）
+    /// 环境自检（模型/二进制/依赖）
     #[tool(name = "check", description = "环境自检（模型/二进制/依赖）")]
     async fn check(
         &self,
-        Parameters(p): Parameters<serde_json::Map<String, Value>>,
+        Parameters(_p): Parameters<serde_json::Map<String, Value>>,
     ) -> Result<Json<Value>, String> {
-        python_fallback("check", &p).map(Json)
+        Ok(Json(setup::check()))
     }
 
-    /// 引导安装（Python 回退）
-    #[tool(name = "setup", description = "引导安装器（模型下载/目录创建）")]
+    /// 引导安装（模型目录创建/下载提示）
+    #[tool(name = "setup", description = "引导安装器（模型目录创建/下载提示）")]
     async fn setup(
         &self,
-        Parameters(p): Parameters<serde_json::Map<String, Value>>,
+        Parameters(_p): Parameters<serde_json::Map<String, Value>>,
     ) -> Result<Json<Value>, String> {
-        python_fallback("setup", &p).map(Json)
+        Ok(Json(setup::setup()))
     }
 }
 

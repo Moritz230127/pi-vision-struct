@@ -4,8 +4,8 @@
 DeepSeek 等纯文本 LLM 不需要"看懂"图片，它需要**最高精度的数理数据**来做**数值推理**。
 
 > **平台：仅 Linux x86_64。** 全部工具只读、本地、无网络外发（`a11y` 的会话 DBus 除外）。
-> **V4：全面 Rust 化**（S0-S8 完成）——传感器/融合/规则/调度/沙箱全部 Rust 实现，
-> 与 Python 版逐字段差分门禁验证。**零第三方 API、零其他模型**。
+> **V4.1：全面超越**（P1-P4 完成）——传感器/融合/规则/调度/沙箱全部 Rust 实现，
+> 与 Python 版逐字段差分门禁验证（容差全收紧）。**零 Python 回退**（仅 layout 因 paddle PIR 导出不兼容保留回退）。
 
 ---
 
@@ -91,7 +91,7 @@ DeepSeek 在文本推理上是最强模型之一，它不需要别人替它"理�
 | paddle OCR 后端 | **rapidocr-core**（fork 修复 det parity：BGR + fillPoly + unclip 1.4） |
 | OWLv2 Python 推理 | **OWLv2 三 ONNX 导出**（text/vision encoder + detection head + 自研 NMS） |
 | OmniParser Python | **Florence-2 拆分 ONNX**（vision/language encoder + decoder 自回归生成循环） |
-| 三 conda env | **单 Rust 二进制**（vs-bin）+ 少量 Python 回退（layout/segment decoder） |
+| 三 conda env | **单 Rust 二进制**（vs-bin）+ 1 处 Python 回退（layout） |
 
 ### 1.3 精度保证
 
@@ -178,7 +178,7 @@ DeepSeek 在文本推理上是最强模型之一，它不需要别人替它"理�
 | 子命令 | 参数 | 说明 |
 | --- | --- | --- |
 | `saliency` | `--image` + `--top-n`/`--min-score` | U²-Net 显著性 → top-N 候选区域 |
-| `segment` | `--image` + `--saliency`(联动) | MobileSAM 前景分割（Rust encoder + Python decoder 回退） |
+| `segment` | `--image` + `--saliency`(联动) | MobileSAM 前景分割（Rust encoder + mask decoder ONNX 全 Rust） |
 | `depth` | `--image` + `--region` | MiDaS 单目深度（近/中/远分布） |
 | `edge` | `--image` + `--max-lines` | Devernay 亚像素边缘（精度 0.0000px） |
 | `ascii` | `--image` + `--cols`/`--rows`/`--color` | 多分辨率 ASCII 栅格 |
@@ -233,13 +233,14 @@ DeepSeek 综合推理 → 最终答案
 
 **当前状态：105+ 测试全绿；clippy 0 警告；fmt 干净。**
 
-### 性能基准卡（release vs Python，s03_alignment.png）
+### 性能基准卡（release vs Python，s03_alignment.png，2026-09-07 实测）
 
 | 传感器 | Rust release | Python | 加速比 |
 | --- | --- | --- | --- |
-| scene_stats | 26ms | 296ms | **11.4×** |
-| pix | 211ms | 765ms | **3.6×** |
-| ocr | 1034ms | 1862ms | **1.8×** |
+| scene_stats | 19ms | 323ms | **17.0×** |
+| pix | 203ms | 829ms | **4.1×** |
+| ocr | 1077ms | 1969ms | **1.8×** |
+| cluster（3 文件） | 552ms | — | 纯 Rust（无 Python 对应） |
 
 ```bash
 cd rust && cargo test --workspace          # 全量测试
@@ -254,15 +255,14 @@ cargo build --release -p vs-bin            # 单二进制
 
 - **Rust 工具链**：cargo workspace（vs-core / vs-bin / vsd / vs-mcp 四 crate）
 - **ONNX 模型**（本地缓存，离线可用）：`~/.cache/vsensor/`（u2net.onnx / mobile_sam_encoder.onnx / midas_v21_small_256.onnx / rapidocr/ / florence2/ / owlv2/）
-- **Python 回退**（少量）：`layout`（PP-DocLayoutV3 paddle 导出不兼容）、`segment` mask decoder（torch）、`vs_segment_decoder.py`
+- **Python 回退**（1 处）：`layout`（PP-DocLayoutV3 paddle 3.x PIR 导出不兼容，plan2 §6 已知风险）
 - 仅 Linux；layout / detect 首次需联网下载权重
 
 ---
 
 ## 六、已知限制
 
-- `segment` mask decoder 与 `layout` 为 Python 回退（paddle2onnx PIR 不兼容 / Transformer 数值一致性风险）
+- `layout` 为 Python 回退（paddle 3.x PIR 导出不兼容 paddle2onnx，plan2 §6 已知风险）
 - Florence-2 caption 生成（ort greedy vs transformers 采样）内容不同（门禁用非空 + 长度容差）
-- `scipy` 为 `audit3d` 网格级精度的硬依赖（V4 未 Rust 化 audit3d）
 - 模型自身不能看图：**永远先调工具取结构化数据，再基于数字推理**
 - 仅 Linux；layout / detect 首次需联网下载权重

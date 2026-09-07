@@ -1,7 +1,7 @@
 /**
- * pi-vision-struct — pi-coding-agent 适配器壳（V4：exec vs-bin 二进制，零业务逻辑）
+ * pi-vision-struct — pi-coding-agent 适配器壳（V4.1：exec vs-bin 二进制，零业务逻辑）
  *
- * 全部计算在 Rust 二进制 `vs-bin`（或 Python 回退脚本）；本文件只做：
+ * 全部计算在 Rust 二进制 `vs-bin`；本文件只做：
  * spawn 二进制 + 参数透传 + 输出回传。工具名/参数与 V3 完全兼容。
  */
 
@@ -11,9 +11,8 @@ import { fileURLToPath } from "node:url";
 
 const PKG_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const VS_BIN = process.env.VS_BIN || `${PKG_ROOT}rust/target/release/vs-bin`;
-const PY = (name: string) => `${PKG_ROOT}python/${name}`;
 
-// action → vs-bin 子命令（Rust 原生）；未 Rust 化的走 Python 回退
+// action → vs-bin 子命令（全 Rust，零 Python 回退）
 const RUST_ACTIONS: Record<string, string> = {
 	capture: "capture",
 	pixels: "pix",
@@ -37,6 +36,14 @@ const RUST_ACTIONS: Record<string, string> = {
 	layout: "layout",
 	blend: "blend",
 	blender_dump: "blend",
+	wallpaper: "wall",
+	analyze: "analyze",
+	cluster: "cluster",
+	audit3d: "audit3d",
+	zoom: "protocol",
+	probe: "protocol",
+	check: "check",
+	setup: "setup",
 };
 
 // 参数名 → vs-bin flag（仅透传，无逻辑）
@@ -86,30 +93,7 @@ async function dispatch(action: string, params: Record<string, unknown>): Promis
 		}
 		return run(VS_BIN, args, 600_000);
 	}
-	// Python 回退（wallpaper/env/analyze/cluster/audit3d/zoom/probe/check/setup）
-	const script: Record<string, string> = {
-		wallpaper: "vs_wall.py",
-		analyze: "vs_analyze.py",
-		cluster: "vs_cluster.py",
-		audit3d: "vs_audit3d.py",
-		zoom: "vs_protocol.py",
-		probe: "vs_protocol.py",
-		check: "setup/vs_setup.py",
-		setup: "setup/vs_setup.py",
-	};
-	const s = script[action];
-	if (!s) return JSON.stringify({ error: `未知 action: ${action}` });
-	const args = [PY(s)];
-	if (action === "zoom" || action === "probe") args.unshift(action);
-	if (action === "check") args.push("--check");
-	if (action === "setup") {
-		const sa = String(params.setup_args ?? "").trim();
-		args.push(...(sa ? sa.split(/\s+/) : ["--dry-run"]));
-	}
-	for (const [k, v] of Object.entries(params)) {
-		if (FLAGS[k] && v !== undefined && v !== "") args.push(FLAGS[k], String(v));
-	}
-	return run("python3", args, 1_200_000);
+	return JSON.stringify({ error: `未知 action: ${action}` });
 }
 
 export default function visionStructExtension(pi: ExtensionAPI) {
@@ -126,7 +110,7 @@ export default function visionStructExtension(pi: ExtensionAPI) {
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: Object.keys(RUST_ACTIONS).concat(["wallpaper", "env", "analyze", "cluster", "audit3d", "zoom", "probe", "check", "setup"]) },
+				action: { type: "string", enum: Object.keys(RUST_ACTIONS) },
 				image: { type: "string" },
 				region: { type: "string" },
 				colors: { type: "number" },
