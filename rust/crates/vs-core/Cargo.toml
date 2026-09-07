@@ -16,3 +16,12 @@ tokenizers.workspace = true
 rapidocr-core = { path = "../../vendor/rapidocr-core" }
 regex.workspace = true
 ort.workspace = true
+tokio.workspace = true
+xcap = "0.9"
+chromiumoxide = "0.9"
+atspi = "0.30"
+zbus = "5"
+pdfium-render = "0.9.4"
+blend-rs = "0.3.0"
+zip = "2"
+roxmltree = "0.21"

@@ -9,12 +9,16 @@
 //! - [`color`]：CIE Lab ΔE76 / WCAG 对比度 / hex 互转
 //! - [`util`]：Python 兼容的取整等基础工具
 
+pub mod a11y;
 pub mod ascii;
 pub mod audit;
 pub mod bbox;
+pub mod blend;
+pub mod capture;
 pub mod color;
 pub mod depth;
 pub mod detect;
+pub mod dom;
 pub mod edge;
 pub mod fusion;
 pub mod geometry;
@@ -22,7 +26,9 @@ pub mod image;
 pub mod layout;
 pub mod ocr;
 pub mod omniparser;
+pub mod pdf;
 pub mod pix;
+pub mod pptx;
 pub mod rules;
 pub mod saliency;
 pub mod scene_stats;
