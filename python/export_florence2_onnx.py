@@ -85,8 +85,8 @@ def main() -> int:
             return x
 
     ve = VisionEncoder(model)
-    # 测试 64×64 输入（OmniParser 图标裁剪尺寸）
-    dummy_px = torch.randn(1, 3, 64, 64)
+    # 测试 768×768 输入（Florence2ImageProcessor size=768，DaViT patch 32 → 576 tokens）
+    dummy_px = torch.randn(1, 3, 768, 768)
     with torch.no_grad():
         feat = ve(dummy_px)
     print(f"[export] vision_encoder 输出: {tuple(feat.shape)}", flush=True)
