@@ -3,7 +3,8 @@
 > 状态: APPROVED — 用户已确认核心约束（全面 Rust / 不用其他语言 / 最高效率调度 / 最低延迟）
 > 日期: 2026-09-06
 > 版本: v4.0.0（目标）
-> 约束: **先不发布**（不 push GitHub / 不 Release）；实现语言仅 Rust；schema v3 输出契约与 V3 差分兼容；零第三方 API；全部输出确定性可复算。
+> 约束: **先不发布**（不 push GitHub / 不 Release）；实现语言仅 Rust；schema v3 输出契约与 V3 差分兼
+  容；零第三方 API；全部输出确定性可复算。
 
 ---
 
@@ -61,7 +62,7 @@
 
 ## 2. 架构设计
 
-```
+```text
 ┌─ 宿主层 ─────────────────────────────────────────────┐
 │ pi-coding-agent: TS 薄壳（平台约束，~50 行 exec 胶水） │  ← 唯一非 Rust 代码
 │ Claude Code: Rust MCP server（rmcp crate）            │  ← 纯 Rust
@@ -94,7 +95,7 @@
 
 ### 2.2 调度器设计（最高效率）
 
-```
+```text
 请求 → 优先级队列（analyze > zoom > probe > bg）
      → 显存预算检查（NVML 实时查询，总预算 6.5GB / 8GB VRAM）
      → GPU 信号量（串行推理，杜绝同刻双 GPU 占用）
@@ -103,7 +104,9 @@
      → CPU 降级（显存不足时自动 CPU 推理，任务永不失败）
 ```
 
-**与 V3 的关键差异**：V3 用子进程隔离（每次推理 spawn 子进程，峰值 816MB/5 并发）；V4 用**进程内推理 + 显式模型卸载**（ort session drop）——省掉进程 spawn 开销（~50-100ms/次），延迟更低，显存由调度器精确控制。
+**与 V3 的关键差异**：V3 用子进程隔离（每次推理 spawn 子进程，峰值 816MB/5 并发）；
+V4 用**进程内推理 + 显式模型卸载**（ort session drop）——省掉进程 spawn 开销
+（~50-100ms/次），延迟更低，显存由调度器精确控制。
 
 ### 2.3 延迟优化策略
 
@@ -224,7 +227,8 @@
 
 ### 4.4 3D 模块（blender_dump/depth/audit3d）边界决策点
 
-- 选项：A. blend-rs 纯 Rust 解析 .blend + 自研深度栅格化（全 Rust，工作量大） B. 保留 Blender 子进程（Blender 是独立应用，但需其 Python 脚本驱动——违反"不用其他语言"精神） C. 3D 模块延后到 V4.1
+- 选项：A. blend-rs 纯 Rust 解析 .blend + 自研深度栅格化（全 Rust，工作量大） B. 保留 Blender 子进程
+  （Blender 是独立应用，但需其 Python 脚本驱动——违反"不用其他语言"精神） C. 3D 模块延后到 V4.1
 - **决策：A 优先；若栅格化精度不达标，C 延后**
 
 ### 4.5 明确排除（不进入 V4 范围）
@@ -236,7 +240,7 @@
 
 ## 5. 验证策略（差分测试）
 
-```
+```text
 fixture (bench_fixtures/*.json + bench/samples/*.png)
    ├── Python 实现 → output_py.json   （基线，已锁定）
    └── Rust 实现   → output_rs.json
