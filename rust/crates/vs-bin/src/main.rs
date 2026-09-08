@@ -286,6 +286,9 @@ enum Command {
         /// G3 闭环验证：click 后截图对比（verify_click）。
         #[arg(long)]
         verify_click: bool,
+        /// G4 窗口过滤：只分析指定 niri 窗口 id 区域（排除终端/其他窗口内容）。
+        #[arg(long)]
+        window: Option<String>,
     },
     /// GUI 行动层（plan4 G1）：click/type/key/drag/scroll/focus（wlrctl serve）。
     Gui {
@@ -610,6 +613,7 @@ fn main() {
             sensor,
             confirm,
             verify_click,
+            window,
         } => protocol::run(&protocol::ProtocolParams {
             action,
             image: image.to_string_lossy().into_owned(),
@@ -618,6 +622,7 @@ fn main() {
             sensor,
             confirm,
             verify_click,
+            window,
         })
         .unwrap_or_else(|e| json!({"error": "vs_protocol failed", "detail": e})),
         Command::Gui {

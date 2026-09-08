@@ -117,6 +117,8 @@ struct ProtocolParams {
     sensor: Option<String>,
     /// probe 确认模式：对指定融合元素 id 重新检测（E6 确定性锚点）。
     confirm: Option<String>,
+    /// G4 窗口过滤：只分析指定 niri 窗口 id 区域。
+    window: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
@@ -519,6 +521,7 @@ impl VsToolHandler {
             sensor: p.sensor,
             confirm: p.confirm,
             verify_click: false,
+            window: p.window,
         })
         .map(Json)
     }

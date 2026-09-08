@@ -11,6 +11,14 @@ use serde_json::{json, Value};
 
 use crate::schema::{envelope, NOTATION_GUIDE};
 
+/// 读取图片物理尺寸（像素）。失败时回退 (0, 0)。
+fn image_size_px(image: &str) -> (u32, u32) {
+    match crate::image::load_rgb(Path::new(image)) {
+        Ok(img) => (img.width, img.height),
+        Err(_) => (0, 0),
+    }
+}
+
 /// 协议参数。
 pub struct ProtocolParams {
     /// analyze | zoom | probe
@@ -23,6 +31,8 @@ pub struct ProtocolParams {
     pub confirm: Option<String>,
     /// G3 闭环验证：click 后截图对比（verify_click）。
     pub verify_click: bool,
+    /// G4 窗口过滤：只分析指定 niri 窗口 id 区域（排除终端/其他窗口内容）。
+    pub window: Option<String>,
 }
 
 /// analyze：粗报告（plan3 E3 分层感知——默认轻量路径）。
@@ -32,7 +42,6 @@ pub struct ProtocolParams {
 /// 目标：总输出 < 3K tokens（两级感知预算的"粗"层）。
 fn analyze(image: &str) -> Result<Value, String> {
     let img = Path::new(image);
-
     // 1) 融合元素清单：ocr + omniparser + detect → element_fusion
     let ocr = crate::ocr::run(
         img,
@@ -116,7 +125,16 @@ fn analyze(image: &str) -> Result<Value, String> {
         });
         els.truncate(15);
         for e in els.iter_mut() {
-            let keep = ["id", "bbox", "center", "text", "caption", "conf", "sources"];
+            let keep = [
+                "id",
+                "bbox",
+                "center",
+                "text",
+                "caption",
+                "conf",
+                "sources",
+                "assertion",
+            ];
             if let Some(obj) = e.as_object_mut() {
                 obj.retain(|k, _| keep.contains(&k.as_str()));
                 // caption 截断 40 字符（token 治理）
@@ -173,6 +191,137 @@ fn analyze(image: &str) -> Result<Value, String> {
         fmt_ids(&speculative_ids)
     ));
     Ok(report)
+}
+
+/// 估算 niri 窗口的屏幕位置（逻辑坐标）。
+///
+/// niri 不暴露窗口屏幕坐标（`tile_pos_in_workspace_view` 为 null），
+/// 用启发式：workspace → output 的 x 偏移 + column 索引 × tile 宽度。
+/// 返回 (x, y, w, h) 逻辑坐标；失败返回 None。
+fn window_logical_rect(window_id: &str) -> Option<(f64, f64, f64, f64)> {
+    use std::process::Command;
+    // 1) 窗口信息
+    let wins: Value = Command::new("niri")
+        .args(["msg", "--json", "windows"])
+        .output()
+        .ok()
+        .and_then(|o| serde_json::from_slice(&o.stdout).ok())?;
+    let win = wins.as_array()?.iter().find(|w| {
+        w.get("id").and_then(|i| i.as_i64()).map(|i| i.to_string()) == Some(window_id.to_string())
+    })?;
+    let ws_id = win.get("workspace_id").and_then(|v| v.as_i64())?;
+    let layout = win.get("layout")?;
+    let tile_w = layout.get("tile_size")?.as_array()?.first()?.as_f64()?;
+    let tile_h = layout.get("tile_size")?.as_array()?.get(1)?.as_f64()?;
+    let col = layout
+        .get("pos_in_scrolling_layout")?
+        .as_array()?
+        .first()?
+        .as_i64()
+        .unwrap_or(1);
+    // 2) workspace → output
+    let ws: Value = Command::new("niri")
+        .args(["msg", "--json", "workspaces"])
+        .output()
+        .ok()
+        .and_then(|o| serde_json::from_slice(&o.stdout).ok())?;
+    let out_name = ws
+        .as_array()?
+        .iter()
+        .find(|w| w.get("id").and_then(|i| i.as_i64()) == Some(ws_id))?
+        .get("output")?
+        .as_str()?
+        .to_string();
+    // 3) output 的 logical x 偏移
+    let outs: Value = Command::new("niri")
+        .args(["msg", "--json", "outputs"])
+        .output()
+        .ok()
+        .and_then(|o| serde_json::from_slice(&o.stdout).ok())?;
+    let out_x = outs
+        .as_object()?
+        .get(&out_name)?
+        .get("logical")?
+        .get("x")?
+        .as_f64()?;
+    let out_y = outs
+        .as_object()?
+        .get(&out_name)?
+        .get("logical")?
+        .get("y")?
+        .as_f64()?;
+    // 4) 窗口位置 = output 偏移 + (col-1) × tile_w
+    let x = out_x + (col as f64 - 1.0) * tile_w;
+    Some((x, out_y, tile_w, tile_h))
+}
+
+/// analyze --window <id>：只分析指定窗口区域（排除终端/其他窗口内容）。
+///
+/// 流程：niri 窗口位置（逻辑）→ 换算物理像素 → 裁剪 → analyze → 坐标偏移回原图。
+fn analyze_window(image: &str, window_id: &str) -> Result<Value, String> {
+    // 1) 窗口逻辑位置
+    let (wx, wy, ww, wh) = window_logical_rect(window_id)
+        .ok_or_else(|| format!("无法定位窗口 {window_id}（niri 窗口信息缺失）"))?;
+    // 2) 换算物理像素（capture size / layout size）
+    let (w_cap, h_cap) = image_size_px(image);
+    let (w_log, h_log) = crate::gui::layout_size();
+    let sx = if w_log > 0 {
+        w_cap as f64 / w_log as f64
+    } else {
+        1.0
+    };
+    let sy = if h_log > 0 {
+        h_cap as f64 / h_log as f64
+    } else {
+        1.0
+    };
+    let (px, py, pw, ph) = (wx * sx, wy * sy, ww * sx, wh * sy);
+    // 3) 裁剪窗口区域 → 临时文件
+    let img = crate::image::load_rgb(Path::new(image)).map_err(|e| format!("load {image}: {e}"))?;
+    let (x, y) = (px.max(0.0) as u32, py.max(0.0) as u32);
+    let (w, h) = (
+        pw.min(img.width as f64 - x as f64) as u32,
+        ph.min(img.height as f64 - y as f64) as u32,
+    );
+    if w == 0 || h == 0 {
+        return Err(format!("窗口 {window_id} 区域为空（{px},{py} {pw}x{ph}）"));
+    }
+    let crop = image::imageops::crop_imm(&img_to_dynamic(&img), x, y, w, h).to_image();
+    let tmp = format!("/tmp/vsd_window_{window_id}.png");
+    crop.save(&tmp).map_err(|e| format!("save crop: {e}"))?;
+    // 4) 分析裁剪区域
+    let mut report = analyze(&tmp)?;
+    // 5) 坐标偏移回原图（物理像素）
+    if let Some(els) = report["elements"].as_array_mut() {
+        for e in els.iter_mut() {
+            if let Some(b) = e.get_mut("bbox").and_then(|b| b.as_array_mut()) {
+                if b.len() >= 4 {
+                    b[0] = json!(b[0].as_f64().unwrap_or(0.0) + x as f64);
+                    b[1] = json!(b[1].as_f64().unwrap_or(0.0) + y as f64);
+                    b[2] = json!(b[2].as_f64().unwrap_or(0.0) + x as f64);
+                    b[3] = json!(b[3].as_f64().unwrap_or(0.0) + y as f64);
+                }
+            }
+            if let Some(c) = e.get_mut("center").and_then(|c| c.as_array_mut()) {
+                if c.len() >= 2 {
+                    c[0] = json!(c[0].as_f64().unwrap_or(0.0) + x as f64);
+                    c[1] = json!(c[1].as_f64().unwrap_or(0.0) + y as f64);
+                }
+            }
+        }
+    }
+    report["source"] = json!({"type": "window", "window_id": window_id, "path": image});
+    report["metrics"]["window_rect_logical"] = json!([wx, wy, ww, wh]);
+    let _ = std::fs::remove_file(&tmp);
+    Ok(report)
+}
+
+/// 将 RgbImage 转为 DynamicImage（供 crop_imm 使用）。
+fn img_to_dynamic(img: &crate::image::RgbImage) -> image::DynamicImage {
+    use image::ImageBuffer;
+    let buf: ImageBuffer<image::Rgb<u8>, Vec<u8>> =
+        ImageBuffer::from_raw(img.width, img.height, img.data.clone()).unwrap();
+    image::DynamicImage::ImageRgb8(buf)
 }
 
 /// zoom：细报告（plan3 E3——区域 2× upscale + 局部融合元素 + ascii 局部）。
@@ -579,7 +728,14 @@ fn probe(image: &str, bbox: &str, sensor: &str) -> Result<Value, String> {
 /// 运行协议动作。
 pub fn run(p: &ProtocolParams) -> Result<Value, String> {
     match p.action.as_str() {
-        "analyze" => analyze(&p.image),
+        "analyze" => {
+            // G4：--window <id> 只分析指定窗口区域（排除终端/其他窗口内容）
+            if let Some(wid) = &p.window {
+                analyze_window(&p.image, wid)
+            } else {
+                analyze(&p.image)
+            }
+        }
         "zoom" => {
             let region = p
                 .region
@@ -630,6 +786,23 @@ pub fn run(p: &ProtocolParams) -> Result<Value, String> {
                         None
                     }
                 });
+            // 坐标换算：capture 物理像素 → 逻辑坐标（wlrctl motion_absolute 需要）
+            // capture 输出 5760×1800（scale 1.25），layout 4608×1440 → ÷1.25
+            let fallback = fallback.map(|(x, y)| {
+                let (w_cap, h_cap) = image_size_px(&p.image);
+                let (w_log, h_log) = crate::gui::layout_size();
+                let sx = if w_log > 0 {
+                    w_cap as f64 / w_log as f64
+                } else {
+                    1.0
+                };
+                let sy = if h_log > 0 {
+                    h_cap as f64 / h_log as f64
+                } else {
+                    1.0
+                };
+                (x / sx, y / sy)
+            });
             let r = crate::gui::click_element(id, fallback)?;
             // 闭环：返回元素信息 + 点击结果
             let mut out = r.clone();
@@ -670,6 +843,7 @@ mod tests {
             sensor: None,
             confirm: None,
             verify_click: false,
+            window: None,
         };
         assert!(run(&p).is_err());
     }
@@ -684,6 +858,7 @@ mod tests {
             sensor: None,
             confirm: None,
             verify_click: false,
+            window: None,
         };
         assert!(run(&p).is_err());
     }
@@ -698,6 +873,7 @@ mod tests {
             sensor: None,
             confirm: None,
             verify_click: false,
+            window: None,
         };
         assert!(run(&p).is_err());
     }
@@ -712,6 +888,7 @@ mod tests {
             sensor: None,
             confirm: None,
             verify_click: false,
+            window: None,
         };
         assert!(run(&p).is_err());
     }
@@ -727,6 +904,7 @@ mod tests {
             sensor: None,
             confirm: Some("abc".into()),
             verify_click: false,
+            window: None,
         };
         assert!(run(&p).is_err(), "confirm 非整数应报错");
     }
@@ -746,6 +924,7 @@ mod tests {
             sensor: None,
             confirm: Some("999".into()),
             verify_click: false,
+            window: None,
         };
         assert!(run(&p).is_err(), "confirm 超范围 id 应报错");
     }
@@ -765,6 +944,7 @@ mod tests {
             sensor: None,
             confirm: Some("0".into()),
             verify_click: false,
+            window: None,
         };
         let r = run(&p).unwrap();
         assert_eq!(r["confirmed"], true, "已知元素应确认");
@@ -788,6 +968,7 @@ mod tests {
             sensor: None,
             confirm: None,
             verify_click: false,
+            window: None,
         };
         let r = run(&p).unwrap();
         let note = r["note"].as_str().unwrap();
@@ -814,6 +995,7 @@ mod tests {
             sensor: None,
             confirm: None,
             verify_click: false,
+            window: None,
         };
         let r = run(&p).unwrap();
         assert!(r.get("ascii").is_none(), "analyze 不应返回 ascii 全栅格");
@@ -855,6 +1037,7 @@ mod tests {
             sensor: None,
             confirm: None,
             verify_click: false,
+            window: None,
         };
         let r = run(&p).unwrap();
         assert_eq!(r["source"]["upscale"], 2, "zoom 应 2× upscale");

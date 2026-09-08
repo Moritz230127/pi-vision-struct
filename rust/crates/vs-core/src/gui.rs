@@ -140,7 +140,7 @@ fn wlrctl_send(cmd: &str) -> Result<(), String> {
 // ---- 布局（union 逻辑像素）----
 
 /// 获取布局尺寸（union 4608×1440，niri msg outputs）。
-fn layout_size() -> (i64, i64) {
+pub fn layout_size() -> (i64, i64) {
     let out = Command::new(NIRI)
         .args(["msg", "--json", "outputs"])
         .output()
