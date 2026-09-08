@@ -1,7 +1,8 @@
 # plan5.md — GUI 控制性能修复（对标 Codex：从 45s/轮 到 1s/轮）
 
 > 定位：plan4 G3 实测失败后的性能修复计划。Blender 莫比乌斯环测试 10 分钟未完成
-> （Codex 约 5 秒），根因是**架构选错主通道**——我们用 DL 传感器（像素推理 15s）
+> （Codex 约 5 秒），根因是**架构选错主通道**——我们用 DL
+  传感器（像素推理 15s）
 > 做感知，Codex 用 AX 树（文本结构 ~100ms）。
 >
 > 目标：每轮感知 ≤1s（当前 15s）、行动 ≤0.1s（当前 15s）、单任务 ≤10 轮。
@@ -45,19 +46,24 @@ Codex:  AX 树 = 文本（"按钮[3] 名称=发送 位置=..."）→ 零 DL 推�
 我们:   capture → ocr(7.7s) + detect(4s) + omniparser(0.9s) → 融合 → 15s
 ```
 
-AX 树是应用主动暴露的结构（零推理），我们用 DL 从像素猜结构。**a11y.rs 已实现但 analyze 默认走 DL 传感器**——架构上选错了主通道。
+AX 树是应用主动暴露的结构（零推理），我们用 DL 从像素猜结构
+  。**a11y.rs 已实现但 analyze 默认走 DL 传感器**——架构上选错了主通道。
 
 ### 根因 2：行动架构差距（300×）
 
-Codex 的 AX 动作直达（~50ms）；我们的 vision_click 需先 analyze（15s）拿坐标。**AT-SPI DoAction 已实现（G1）但真实应用不可用**（树读不到）。
+Codex 的 AX 动作直达（~50ms）；我们的 vision_click 需先 anal
+  yze（15s）拿坐标。**AT-SPI DoAction 已实现（G1）但真实应用不
+    可用**（树读不到）。
 
 ### 根因 3：模型差距（不可改变，可缓解）
 
-GPT-6 Astra 多模态 + 快推理；DeepSeek-V4-Flash 纯文本 + 慢推理。缓解：每轮 ≤1K tokens + 减少轮次。
+GPT-6 Astra 多模态 + 快推理；DeepSeek-V4-Flash 纯文本 + 慢推
+  理。缓解：每轮 ≤1K tokens + 减少轮次。
 
 ### 根因 4：试错放大（10 分钟放大器）
 
-Shift+A 无效试 3-4 种方式、坐标偏位重试、终端污染决策错误——每轮 45s × 3-4 次试错 = 3 分钟。
+Shift+A 无效试 3-4 种方式、坐标偏位重试、终端污染决策错误—
+  —每轮 45s × 3-4 次试错 = 3 分钟。
 
 ---
 
@@ -72,7 +78,8 @@ Shift+A 无效试 3-4 种方式、坐标偏位重试、终端污染决策错误�
   - 对比 gui_a11y.py（Python 版能读到 Firefox——实测 apps 列表有 Firefox）
   - 用 busctl 直接调 AT-SPI 接口验证（GetChildren / GetApplication）
 - [ ] 修复 a11y.rs 的树读取（对齐 Python 版 gui_a11y.py 的调用方式）
-- [ ] 门禁：`vs-bin a11y --app firefox` 返回 ≥1 元素；`--app blender` 返回 ≥1 元素
+- [ ] 门禁：`vs-bin a11y --app firefox` 返回 ≥1 元素；`--ap
+  p blender` 返回 ≥1 元素
 
 ### F2 · a11y 树优先的 analyze（P0，感知 15s → 0.1s）
 
@@ -87,7 +94,8 @@ Shift+A 无效试 3-4 种方式、坐标偏位重试、终端污染决策错误�
 **目标**：click [N] 优先 DoAction（~50ms），vision_click 仅兜底。
 
 - [ ] 打通 DoAction 在真实应用的调用（F1 修复后）
-- [ ] click [N] 流程：a11y 动作（主）→ element_click（GetExtents）→ vision_click（兜底）
+- [ ] click [N] 流程：a11y 动作（主）→ element_click（GetEx
+  tents）→ vision_click（兜底）
 - [ ] 门禁：真实应用 click [N] 用 a11y 动作 ≤0.1s
 
 ### F4 · 键盘组合键修复（P1，消除试错）

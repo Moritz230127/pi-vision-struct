@@ -1,11 +1,14 @@
-# plan4.md — pi-version-and-gui：深度融合 GUI 控制（对标 ChatGPT-6 Astra + Codex Computer Use）
+# plan4.md — pi-version-and-gui：深度融合 GUI 控制（对标 Ch
+
+  atGPT-6 Astra + Codex Computer Use）
 
 > 定位：V4 第二阶段工程。在 plan3（感知层 E1-E6）之上，实现**感知-行动闭环**的
 > GUI 控制能力——效率对标 ChatGPT-6 Astra + Codex Computer Use，精度对标
 > Codex Windows/macOS，最终以 `pi install npm:pi-version-and-gui` 发布。
 >
 > 核心架构（用户确认）：**深度融合** = 感知/行动/协议/事件共享同一数据模型
-> （element_index），单进程零 IPC。这是 Codex 高效的本质（共享数据模型 + 闭环），
+> （element_index），单进程零 IPC。这是 Codex 高效的本质（共
+  享数据模型 + 闭环），
 > 单进程是超越点。
 
 ---
@@ -24,7 +27,8 @@
 | 键盘 | ydotool keycode（niri 兼容，enter=28 已验证）+ wtype | pi-gui-control ✅ |
 | 事件流 | **niri event-stream 确认可用**（Workspaces/Windows changed 事件） | 实测 ✅ |
 
-**结论**：所有底层能力已就绪，缺的是**行动层（gui.rs）+ AX 动作（DoAction）+ 事件驱动（events.rs）+ npm 布局**。
+**结论**：所有底层能力已就绪，缺的是**行动层（gui.rs）+ AX
+  动作（DoAction）+ 事件驱动（events.rs）+ npm 布局**。
 
 ---
 
@@ -110,15 +114,18 @@ niri 窗口信息（tile 启发式）───┘
 
 ```text
 pi-version-and-gui/                    # npm 包根（= 扩展根）
-├── package.json        # name: pi-version-and-gui（npm 已验证可用，404=未占用）
-│                       # pi: { extensions: ["./extensions"], skills: ["./skills"] }
+├── package.json        # name: pi-version-and-gui（npm
+  已验证可用，404=未占用）
+│                       # pi: { extensions: ["./extensions"
+  ], skills: ["./skills"] }
 │                       # scripts: { postinstall: "node scripts/install.js" }
 ├── extensions/
 │   └── index.ts        # TS 薄壳（exec vs-bin，零业务逻辑）
 ├── skills/
 │   └── gui-control/    # skill：教模型用编号引用协议（click [N]）
 ├── scripts/
-│   └── install.js      # postinstall：从 GitHub Releases 下载二进制 + 模型清单
+│   └── install.js      # postinstall：从 GitHub Release
+  s 下载二进制 + 模型清单
 ├── bin/                # 下载的二进制（vs-bin/vsd/vs-mcp）
 ├── models/             # 模型清单（下载 URL，不打包）
 └── README.md
@@ -126,8 +133,10 @@ pi-version-and-gui/                    # npm 包根（= 扩展根）
 
 ### 4.2 安装流程
 
-`pi install npm:pi-version-and-gui` → npm 装 TS 壳（<1MB）→ postinstall 从 GitHub
-Releases 下载 3 个二进制（~60MB 压缩）→ 模型按需下载（~/.cache/vsensor，~2GB）。
+`pi install npm:pi-version-and-gui` → npm 装 TS 壳（<1MB）
+  → postinstall 从 GitHub
+Releases 下载 3 个二进制（~60MB 压缩）→ 模型按需下载（~/.ca
+  che/vsensor，~2GB）。
 
 ### 4.3 布局决策
 
@@ -144,7 +153,8 @@ Releases 下载 3 个二进制（~60MB 压缩）→ 模型按需下载（~/.cach
 
 **目标**：从"能感知"到"能行动"。
 
-- [ ] `gui.rs`：五级点击降级链（a11y_action → element_click → vision_click → global）
+- [ ] `gui.rs`：五级点击降级链（a11y_action → element_click
+   → vision_click → global）
 - [ ] `a11y.rs` 扩展：AT-SPI `DoAction`（动作直达）
 - [ ] `element_fusion.rs` 扩展：a11y 元素并入统一编号
 - [ ] `protocol.rs` 扩展：`click [N]` 动作 + verify 闭环
@@ -173,9 +183,11 @@ Releases 下载 3 个二进制（~60MB 压缩）→ 模型按需下载（~/.cach
 
 **目标**：`pi install npm:pi-version-and-gui` 一键安装。
 
-- [ ] monorepo 重组：pi-version-and-gui 包结构（extensions/skills/scripts/bin/models）
+- [ ] monorepo 重组：pi-version-and-gui 包结构（extensions/s
+  kills/scripts/bin/models）
 - [ ] `install.js`：GitHub Releases 下载 + 模型清单
-- [ ] 重命名：pi-vision-struct → pi-version-and-gui（扩展目录 + package.json + 知识库）
+- [ ] 重命名：pi-vision-struct → pi-version-and-gui（扩展目
+  录 + package.json + 知识库）
 - [ ] skill：gui-control（编号引用协议教学）
 - **门禁**：本地 `npm pack` + 模拟安装成功；二进制下载脚本可执行
 
