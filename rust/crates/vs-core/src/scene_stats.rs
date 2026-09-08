@@ -269,19 +269,22 @@ fn color_histogram(img: &RgbImage, n_colors: u32) -> Value {
         })
         .collect();
     // 每 distinct 颜色 → 盒索引（盒树划分颜色，恰属一盒）→ 遍历序调色板索引
+    // 性能：构建 color→box 映射一次（O(总颜色)），避免每色线性搜索（O(盒×盒内色)）
+    let mut color_to_box: HashMap<[u8; 3], usize> = HashMap::new();
+    for (i, b) in boxes.iter().enumerate() {
+        if let Some(bb) = b {
+            for (c, _) in &bb.colors {
+                color_to_box.insert(*c, i);
+            }
+        }
+    }
     let mut hist: HashMap<[u8; 3], u32> = HashMap::new();
     for px in img.data.as_chunks::<3>().0 {
         *hist.entry([px[0], px[1], px[2]]).or_insert(0) += 1;
     }
     let mut counts = vec![0u32; n];
     for (color, cnt) in &hist {
-        let box_idx = boxes
-            .iter()
-            .position(|b| {
-                b.as_ref()
-                    .is_some_and(|bb| bb.colors.iter().any(|(c, _)| c == color))
-            })
-            .expect("color must be in a box");
+        let box_idx = *color_to_box.get(color).expect("color must be in a box");
         let pal_idx = order
             .iter()
             .position(|&i| i == box_idx)
