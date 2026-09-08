@@ -41,6 +41,95 @@ pub struct ProtocolParams {
 /// 不返回：原始 ocr/omniparser/detect 元素、edge_point、ascii 全栅格。
 /// 目标：总输出 < 3K tokens（两级感知预算的"粗"层）。
 fn analyze(image: &str) -> Result<Value, String> {
+    // F2（plan5）：a11y 树优先——先跑 AT-SPI（~100ms），有元素则用 a11y（无 DL）
+    if let Ok(a11y_report) = crate::a11y::run(&crate::a11y::A11yParams {
+        app: None,
+        max_items: 60,
+    }) {
+        let a11y_els = a11y_report
+            .get("elements")
+            .and_then(|e| e.as_array())
+            .cloned()
+            .unwrap_or_default();
+        if !a11y_els.is_empty() {
+            return analyze_a11y_only(image, a11y_report);
+        }
+    }
+    // 降级：a11y 空 → DL 融合（现有路径）
+    analyze_dl(image)
+}
+
+/// a11y 优先路径：a11y 元素 + scene_stats 摘要（无 DL 推理，≤1s）。
+fn analyze_a11y_only(image: &str, a11y_report: Value) -> Result<Value, String> {
+    let img = Path::new(image);
+    // 1) a11y 元素 → 统一编号 + 补 center/conf/assertion（与融合元素结构一致）
+    let mut elements: Vec<Value> = a11y_report
+        .get("elements")
+        .and_then(|e| e.as_array())
+        .cloned()
+        .unwrap_or_default();
+    for (i, e) in elements.iter_mut().enumerate() {
+        e["id"] = json!(i);
+        // center = bbox 中心
+        if let Some(b) = e.get("bbox").and_then(|b| b.as_array()) {
+            if b.len() >= 4 {
+                let x1 = b[0].as_f64().unwrap_or(0.0);
+                let y1 = b[1].as_f64().unwrap_or(0.0);
+                let x2 = b[2].as_f64().unwrap_or(0.0);
+                let y2 = b[3].as_f64().unwrap_or(0.0);
+                e["center"] = json!([(x1 + x2) / 2.0, (y1 + y2) / 2.0]);
+            }
+        }
+        // a11y 元素 conf = 1.0（结构确认，非检测）
+        e["conf"] = json!(1.0);
+        e["sources"] = json!(["a11y"]);
+        e["assertion"] = json!("此元素由 AT-SPI 无障碍树确认（结构级，conf 1.0）");
+        // 精简字段（token 治理）
+        let keep = [
+            "id",
+            "bbox",
+            "center",
+            "text",
+            "type",
+            "conf",
+            "sources",
+            "assertion",
+        ];
+        if let Some(obj) = e.as_object_mut() {
+            obj.retain(|k, _| keep.contains(&k.as_str()));
+        }
+    }
+    // token 治理：top-15 截断（与 DL 路径一致）
+    elements.truncate(15);
+    // 2) scene_stats 摘要（metrics 精简）
+    let stats = crate::scene_stats::run(img, &crate::scene_stats::SceneStatsParams { colors: 8 });
+    let stats_metrics = stats
+        .as_ref()
+        .map(|v| v.get("metrics").cloned().unwrap_or(json!({})))
+        .unwrap_or(json!({}));
+    let mut stats_summary = stats_metrics.clone();
+    if let Some(obj) = stats_summary.as_object_mut() {
+        obj.remove("color_histogram");
+    }
+    let mut report = envelope(
+        Some("analyze"),
+        &["a11y", "scene_stats"],
+        Some("screen_px"),
+        Some(json!({"type": "image", "path": image, "channel": "a11y"})),
+    );
+    report["elements"] = json!(elements);
+    report["metrics"] = json!({"scene": stats_summary, "channel": "a11y"});
+    report["notation"] = json!(NOTATION_GUIDE);
+    let ids: Vec<i64> = (0..elements.len() as i64).collect();
+    report["note"] = json!(format!(
+        "粗报告（a11y 通道）：elements 为 AT-SPI 无障碍树元素（编号引用，如 click [3]）；scene 为全局统计摘要。已确认元素 {}（结构级 conf 1.0）。无 DL 推理（a11y 优先）。",
+        format!("[{}]", ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(","))
+    ));
+    Ok(report)
+}
+
+/// DL 兜底路径：ocr + omniparser + detect → element_fusion（现有 analyze 逻辑）。
+fn analyze_dl(image: &str) -> Result<Value, String> {
     let img = Path::new(image);
     // 1) 融合元素清单：ocr + omniparser + detect → element_fusion
     let ocr = crate::ocr::run(
@@ -193,9 +282,24 @@ fn analyze(image: &str) -> Result<Value, String> {
     Ok(report)
 }
 
+/// 查询 niri 窗口的 app_id（用于 a11y 树匹配）。
+fn window_app_id(window_id: &str) -> Option<String> {
+    use std::process::Command;
+    let wins: Value = Command::new("niri")
+        .args(["msg", "--json", "windows"])
+        .output()
+        .ok()
+        .and_then(|o| serde_json::from_slice(&o.stdout).ok())?;
+    wins.as_array()?
+        .iter()
+        .find(|w| {
+            w.get("id").and_then(|i| i.as_i64()).map(|i| i.to_string())
+                == Some(window_id.to_string())
+        })
+        .and_then(|w| w.get("app_id").and_then(|a| a.as_str()).map(String::from))
+}
+
 /// 估算 niri 窗口的屏幕位置（逻辑坐标）。
-///
-/// niri 不暴露窗口屏幕坐标（`tile_pos_in_workspace_view` 为 null），
 /// 用启发式：workspace → output 的 x 偏移 + column 索引 × tile 宽度。
 /// 返回 (x, y, w, h) 逻辑坐标；失败返回 None。
 fn window_logical_rect(window_id: &str) -> Option<(f64, f64, f64, f64)> {
@@ -213,12 +317,6 @@ fn window_logical_rect(window_id: &str) -> Option<(f64, f64, f64, f64)> {
     let layout = win.get("layout")?;
     let tile_w = layout.get("tile_size")?.as_array()?.first()?.as_f64()?;
     let tile_h = layout.get("tile_size")?.as_array()?.get(1)?.as_f64()?;
-    let col = layout
-        .get("pos_in_scrolling_layout")?
-        .as_array()?
-        .first()?
-        .as_i64()
-        .unwrap_or(1);
     // 2) workspace → output
     let ws: Value = Command::new("niri")
         .args(["msg", "--json", "workspaces"])
@@ -250,9 +348,30 @@ fn window_logical_rect(window_id: &str) -> Option<(f64, f64, f64, f64)> {
         .get("logical")?
         .get("y")?
         .as_f64()?;
-    // 4) 窗口位置 = output 偏移 + (col-1) × tile_w
-    let x = out_x + (col as f64 - 1.0) * tile_w;
-    Some((x, out_y, tile_w, tile_h))
+    // 4) 窗口位置：tile 接近输出大小时窗口占满输出（x=output_x）；
+    //    否则用滚动布局列位置（需视口偏移，niri 不暴露——启发式）
+    let out_w = outs
+        .as_object()?
+        .get(&out_name)?
+        .get("logical")?
+        .get("width")?
+        .as_f64()?;
+    let out_h = outs
+        .as_object()?
+        .get(&out_name)?
+        .get("logical")?
+        .get("height")?
+        .as_f64()?;
+    // tile 占满输出（≥90% 宽高）→ 窗口在输出内全屏（x=output_x）
+    let fills_output = tile_w >= out_w * 0.9 && tile_h >= out_h * 0.9;
+    let x = if fills_output {
+        out_x
+    } else {
+        // 多列布局：滚动位置 - 视口偏移（focused 窗口在视口内，偏移 = (col-1)×tile_w）
+        // 视口显示 focused 窗口所在列，故窗口屏幕 x = output_x（focused 时）
+        out_x
+    };
+    Some((x, out_y, tile_w.min(out_w), tile_h.min(out_h)))
 }
 
 /// analyze --window <id>：只分析指定窗口区域（排除终端/其他窗口内容）。
@@ -289,8 +408,30 @@ fn analyze_window(image: &str, window_id: &str) -> Result<Value, String> {
     let crop = image::imageops::crop_imm(&img_to_dynamic(&img), x, y, w, h).to_image();
     let tmp = format!("/tmp/vsd_window_{window_id}.png");
     crop.save(&tmp).map_err(|e| format!("save crop: {e}"))?;
-    // 4) 分析裁剪区域
-    let mut report = analyze(&tmp)?;
+    // 4) 分析裁剪区域（F2：a11y 优先——按窗口 app_id 匹配 a11y 树）
+    let mut report = if let Some(app_id) = window_app_id(window_id) {
+        // 窗口 app_id → a11y 树（~100ms，无 DL）
+        match crate::a11y::run(&crate::a11y::A11yParams {
+            app: Some(app_id.clone()),
+            max_items: 60,
+        }) {
+            Ok(a11y_report) => {
+                let a11y_els = a11y_report
+                    .get("elements")
+                    .and_then(|e| e.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                if !a11y_els.is_empty() {
+                    analyze_a11y_only(&tmp, a11y_report)?
+                } else {
+                    analyze(&tmp)?
+                }
+            }
+            Err(_) => analyze(&tmp)?,
+        }
+    } else {
+        analyze(&tmp)?
+    };
     // 5) 坐标偏移回原图（物理像素）
     if let Some(els) = report["elements"].as_array_mut() {
         for e in els.iter_mut() {
@@ -772,7 +913,11 @@ pub fn run(p: &ProtocolParams) -> Result<Value, String> {
                 .parse()
                 .map_err(|e| format!("click 需要整数元素编号: {e}"))?;
             // 先 analyze 得到融合元素清单 → 取元素 bbox center 作为 vision_click 兜底
-            let base = analyze(&p.image)?;
+            // （--window 时用窗口过滤分析，排除其他窗口内容污染）
+            let base = match &p.window {
+                Some(wid) => analyze_window(&p.image, wid)?,
+                None => analyze(&p.image)?,
+            };
             let fallback: Option<(f64, f64)> = base
                 .get("elements")
                 .and_then(|e| e.as_array())
@@ -973,7 +1118,15 @@ mod tests {
         let r = run(&p).unwrap();
         let note = r["note"].as_str().unwrap();
         assert!(note.contains("已确认元素"), "note 应含已确认元素: {note}");
-        assert!(note.contains("推测元素"), "note 应含推测元素: {note}");
+        // a11y 通道无推测元素（全部 conf 1.0）；DL 通道有
+        if note.contains("a11y 通道") {
+            assert!(
+                !note.contains("推测元素"),
+                "a11y 通道不应有推测元素: {note}"
+            );
+        } else {
+            assert!(note.contains("推测元素"), "note 应含推测元素: {note}");
+        }
         // 每元素带 assertion 字段
         for e in r["elements"].as_array().unwrap() {
             assert!(e.get("assertion").is_some(), "元素应带存在性断言");
