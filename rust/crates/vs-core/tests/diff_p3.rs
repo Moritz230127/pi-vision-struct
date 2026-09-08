@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -139,10 +139,13 @@ fn analyze_matches_python() {
     }
 }
 
-/// protocol analyze：粗报告结构一致（candidates/ascii/metrics）。
+/// protocol analyze：粗报告结构一致（a11y 优先通道，plan5 F2）。
+///
+/// 注：Python golden 为 F2 前的 DL 通道（saliency/ascii/ocr/fusion）；
+/// F2 后 analyze 默认 a11y 优先（无 DL，≤1s），golden 已过时。
+/// 本测试验证当前架构契约：a11y 通道或 DL 兜底通道的结构一致性。
 #[test]
 fn protocol_analyze_matches_python() {
-    let golden = load_golden("protocol_analyze_golden.json");
     let img = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
         .join("bench/samples/s03_alignment.png");
@@ -159,26 +162,43 @@ fn protocol_analyze_matches_python() {
     .expect("protocol analyze 失败");
 
     assert_eq!(out["task"], "analyze");
-    assert_eq!(out["sensors"], golden["sensors"], "sensors 一致");
-    // candidates 数一致（saliency 候选）
-    let g_cands = golden["candidates"].as_array().unwrap();
-    let r_cands = out["candidates"].as_array().unwrap();
-    assert_eq!(r_cands.len(), g_cands.len(), "candidates 数一致");
-    // ascii 结构
-    assert_eq!(out["ascii"]["cols"], golden["ascii"]["cols"]);
-    assert_eq!(out["ascii"]["rows"], golden["ascii"]["rows"]);
-    // metrics 键一致
-    assert_eq!(out["metrics"]["ocr_items"], golden["metrics"]["ocr_items"]);
-    assert_eq!(
-        out["metrics"]["saliency_candidates"],
-        golden["metrics"]["saliency_candidates"]
+    // 通道：a11y 优先（F2）或 DL 兜底
+    let sensors: Vec<String> = out["sensors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s.as_str().map(String::from))
+        .collect();
+    let is_a11y = sensors.iter().any(|s| s == "a11y");
+    let is_dl = sensors.iter().any(|s| s == "element_fusion");
+    assert!(
+        is_a11y || is_dl,
+        "analyze 应为 a11y 通道或 DL 兜底通道: {sensors:?}"
+    );
+    // 融合元素清单存在（编号引用）
+    let els = out["elements"].as_array().unwrap();
+    assert!(!els.is_empty(), "analyze 应返回融合元素清单");
+    for e in els {
+        assert!(e.get("id").is_some(), "元素应带编号");
+        assert!(e.get("sources").is_some(), "元素应带溯源");
+    }
+    // note 含已确认元素汇总（E6 输出模板）
+    let note = out["note"].as_str().unwrap();
+    assert!(note.contains("已确认元素"), "note 应含已确认元素: {note}");
+    // 输出 < 3K tokens（≈12KB）
+    let size = serde_json::to_string(&out).unwrap().len();
+    assert!(
+        size < 12_000,
+        "analyze 输出应 < 3K tokens，实际 {size} bytes"
     );
 }
 
-/// protocol zoom：细报告结构一致（elements/metrics/region）。
+/// protocol zoom：细报告结构一致（element_fusion 通道，plan3 E3）。
+///
+/// 注：Python golden 为 E3 前的原始传感器（ocr/segment）；E3 后 zoom
+/// 用 element_fusion 融合（坐标偏移回原图），golden 已过时。
 #[test]
 fn protocol_zoom_matches_python() {
-    let golden = load_golden("protocol_zoom_golden.json");
     let img = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
         .join("bench/samples/s03_alignment.png");
@@ -195,15 +215,30 @@ fn protocol_zoom_matches_python() {
     .expect("protocol zoom 失败");
 
     assert_eq!(out["task"], "zoom");
-    assert_eq!(out["sensors"], golden["sensors"], "sensors 一致");
-    assert_eq!(out["metrics"]["region"], golden["metrics"]["region"]);
-    // elements 数容差（edge 点数受 resize 滤波器影响）
-    let g_els = golden["elements"].as_array().unwrap().len();
-    let r_els = out["elements"].as_array().unwrap().len();
+    // E3 通道：element_fusion + ascii + edge + depth
+    let sensors: Vec<String> = out["sensors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s.as_str().map(String::from))
+        .collect();
     assert!(
-        (r_els as i64 - g_els as i64).abs() <= 5,
-        "elements 数容差 ±5: rust={r_els} golden={g_els}"
+        sensors.iter().any(|s| s == "element_fusion"),
+        "zoom 应含 element_fusion: {sensors:?}"
     );
+    assert_eq!(out["source"]["upscale"], 2, "zoom 应 2× upscale");
+    assert_eq!(out["metrics"]["region"], json!([100, 80, 320, 300]));
+    // 融合元素坐标偏移回原图（x ≥ 100, y ≥ 80）
+    for e in out["elements"].as_array().unwrap() {
+        if let Some(b) = e.get("bbox").and_then(|b| b.as_array()) {
+            let x = b[0].as_f64().unwrap();
+            let y = b[1].as_f64().unwrap();
+            assert!(x >= 100.0, "bbox x 应偏移回原图: {x}");
+            assert!(y >= 80.0, "bbox y 应偏移回原图: {y}");
+        }
+    }
+    // ascii 局部存在
+    assert!(out.get("ascii").is_some(), "zoom 应返回 ascii 局部");
 }
 
 /// protocol probe：单传感器定向证据结构一致。

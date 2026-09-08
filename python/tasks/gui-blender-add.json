@@ -1,0 +1,20 @@
+{
+  "name": "gui-blender-add",
+  "description": "Blender 键盘优先模板（R5）：focus → move 视口 → 快捷键。Blender 无 AT-SPI，用键盘快捷键（Shift+A 已验证有效）替代鼠标菜单。",
+  "strategy": "keyboard-first",
+  "chain": "focus blender; move 2304 720; key shift+a; key m; key c; key enter",
+  "chain_steps": [
+    {"action": "focus", "window": "blender", "why": "确保键盘事件到达 Blender 窗口"},
+    {"action": "move", "x": 2304, "y": 720, "why": "鼠标移到 3D 视口中心（Shift+A 菜单在光标处弹出）"},
+    {"action": "key", "combo": "shift+a", "why": "打开 Add 菜单（键盘优先，无 AT-SPI）"},
+    {"action": "key", "combo": "m", "why": "菜单过滤到 Mesh"},
+    {"action": "key", "combo": "c", "why": "菜单过滤到 Circle（圆环）"},
+    {"action": "key", "combo": "enter", "why": "确认添加"}
+  ],
+  "verify": {
+    "expected_title": "Blender",
+    "viewport": [0, 0, 4608, 1440],
+    "min_diff_ratio": 0.001
+  },
+  "gate": "Blender 添加圆环用 Shift+A ≤5s"
+}

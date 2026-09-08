@@ -1243,4 +1243,36 @@ mod tests {
         // ascii 局部存在
         assert!(r.get("ascii").is_some(), "zoom 应返回 ascii 局部");
     }
+
+    #[test]
+    fn analyze_cache_hit_under_1s() {
+        // R3 门禁：连续 analyze 同窗口 ≤1s（PerceptionCache 命中）
+        let img = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../bench/samples/s03_alignment.png"
+        );
+        let mk = || ProtocolParams {
+            action: "analyze".into(),
+            image: img.into(),
+            region: None,
+            bbox: None,
+            sensor: None,
+            confirm: None,
+            verify_click: false,
+            window: None,
+        };
+        // 首次 analyze（可能冷路径：a11y/DL）
+        let first = run(&mk()).expect("首次 analyze 应成功");
+        // 连续 analyze 同窗口：缓存命中，≤1s
+        let start = std::time::Instant::now();
+        let second = run(&mk()).expect("缓存命中 analyze 应成功");
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed.as_millis() < 1000,
+            "缓存命中 analyze {}ms >= 1000ms",
+            elapsed.as_millis()
+        );
+        // 结果一致（缓存返回同一报告）
+        assert_eq!(first, second, "缓存命中应返回相同报告");
+    }
 }

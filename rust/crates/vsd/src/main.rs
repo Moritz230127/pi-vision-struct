@@ -142,6 +142,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
         None,
     );
+    // R3：analyze 模型（PerceptionCache 缓存命中 ≤1s，连续 analyze 同窗口不重复感知）
+    sched.register(
+        "analyze",
+        Box::new(|_model, args, _use_gpu| {
+            let image = args
+                .get("image")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "缺少 args.image".to_string())?;
+            let window = args
+                .get("window")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            vs_core::protocol::run(&vs_core::protocol::ProtocolParams {
+                action: "analyze".into(),
+                image: image.to_string(),
+                region: None,
+                bbox: None,
+                sensor: None,
+                confirm: None,
+                verify_click: false,
+                window,
+            })
+        }),
+        None,
+    );
 
     // 事件驱动模式：监听 niri event-stream，变化即再感知
     if cli.watch {

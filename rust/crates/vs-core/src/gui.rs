@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 
 /// GUI 行动参数。
 pub struct GuiParams {
-    /// click | click_element | type | key | drag | scroll | focus | move | status
+    /// click | click_element | type | key | drag | scroll | focus | move | status | chain | verify_task
     pub action: String,
     /// 元素编号（click_element 用，五级降级链入口）。
     pub element_id: Option<usize>,
@@ -43,6 +43,16 @@ pub struct GuiParams {
     pub window: Option<String>,
     /// 点击验证（verify_click 闭环）：点击前后截图对比。
     pub verify: bool,
+    /// R2 chain：多步动作序列（"move 100 100; click; sleep 0.3; key tab"）。
+    pub steps: Option<String>,
+    /// R4 verify_task：任务前截图路径。
+    pub before: Option<String>,
+    /// R4 verify_task：任务后截图路径。
+    pub after: Option<String>,
+    /// R4 verify_task：期望窗口标题子串。
+    pub expected_title: Option<String>,
+    /// R4 verify_task：视口区域（逻辑坐标 "x1,y1,x2,y2"）。
+    pub viewport: Option<String>,
 }
 
 impl Default for GuiParams {
@@ -63,6 +73,11 @@ impl Default for GuiParams {
             dx: None,
             window: None,
             verify: false,
+            steps: None,
+            before: None,
+            after: None,
+            expected_title: None,
+            viewport: None,
         }
     }
 }
@@ -291,6 +306,301 @@ fn focus_window(window: &str) -> Result<(), String> {
         }
     }
     Err(format!("未找到 app_id={window} 的窗口"))
+}
+
+// ---- R2 chain 原语（一次执行多步，减少模型轮次）----
+
+/// 解析 chain 步骤字符串："move 100 100; click; sleep 0.3; key tab"。
+///
+/// 返回 (action, args) 列表。动作与参数以空白分隔，步骤以 `;` 分隔。
+fn parse_chain(steps: &str) -> Result<Vec<(String, Vec<String>)>, String> {
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    for raw in steps.split(';') {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let mut parts = raw.split_whitespace();
+        let action = parts
+            .next()
+            .ok_or_else(|| format!("chain 步骤为空: {raw:?}"))?;
+        let args: Vec<String> = parts.map(String::from).collect();
+        out.push((action.to_string(), args));
+    }
+    if out.is_empty() {
+        return Err("chain 步骤为空".into());
+    }
+    Ok(out)
+}
+
+/// 执行单个 chain 步骤（复用现有原语：move/click/key/type/sleep/scroll/focus/drag）。
+fn run_chain_step(action: &str, args: &[String]) -> Result<Value, String> {
+    match action {
+        "move" => {
+            let (x, y) = chain_xy(args, "move")?;
+            pointer_move(x, y)?;
+            Ok(json!({ "action": "move", "moved": [x, y] }))
+        }
+        "click" => {
+            let button = args.first().cloned().unwrap_or_else(|| "left".to_string());
+            pointer_click(&button)?;
+            Ok(json!({ "action": "click", "clicked": button }))
+        }
+        "key" => {
+            let combo = args.join("+");
+            if combo.is_empty() {
+                return Err("chain key 需要组合（如 key tab / key shift+a）".into());
+            }
+            key(&combo)?;
+            Ok(json!({ "action": "key", "key": combo }))
+        }
+        "type" => {
+            let text = args.join(" ");
+            if text.is_empty() {
+                return Err("chain type 需要文本".into());
+            }
+            type_text(&text)?;
+            Ok(json!({ "action": "type", "typed": text.chars().count() }))
+        }
+        "sleep" => {
+            let secs: f64 = args
+                .first()
+                .and_then(|v| v.parse().ok())
+                .ok_or_else(|| "chain sleep 需要秒数（如 sleep 0.3）".to_string())?;
+            std::thread::sleep(std::time::Duration::from_secs_f64(secs));
+            Ok(json!({ "action": "sleep", "seconds": secs }))
+        }
+        "scroll" => {
+            let dy = args.first().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+            let dx = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(0.0);
+            wlrctl_send(&format!("scroll {dy} {dx}"))?;
+            Ok(json!({ "action": "scroll", "scrolled": [dy, dx] }))
+        }
+        "focus" => {
+            let window = args
+                .first()
+                .ok_or_else(|| "chain focus 需要窗口（id 或 app_id）".to_string())?;
+            focus_window(window)?;
+            Ok(json!({ "action": "focus", "focused": window }))
+        }
+        "drag" => {
+            let (x1, y1, x2, y2) = chain_xyxy(args)?;
+            let button = "left";
+            pointer_move(x1, y1)?;
+            wlrctl_send(&format!("down {button}"))?;
+            wlrctl_send("sleep 0.05")?;
+            for i in 1..=12 {
+                let t = i as f64 / 12.0;
+                let (ix, iy) = (x1 + (x2 - x1) * t, y1 + (y2 - y1) * t);
+                pointer_move(ix, iy)?;
+                wlrctl_send("sleep 0.012")?;
+            }
+            wlrctl_send(&format!("up {button}"))?;
+            Ok(json!({ "action": "drag", "dragged": [[x1, y1], [x2, y2]] }))
+        }
+        other => Err(format!("chain 未知动作: {other}")),
+    }
+}
+
+/// chain 步骤的 (x, y) 参数解析。
+fn chain_xy(args: &[String], action: &str) -> Result<(f64, f64), String> {
+    let x = args
+        .first()
+        .and_then(|v| v.parse().ok())
+        .ok_or_else(|| format!("chain {action} 需要 x y"))?;
+    let y = args
+        .get(1)
+        .and_then(|v| v.parse().ok())
+        .ok_or_else(|| format!("chain {action} 需要 x y"))?;
+    Ok((x, y))
+}
+
+/// chain 步骤的 (x1, y1, x2, y2) 参数解析。
+fn chain_xyxy(args: &[String]) -> Result<(f64, f64, f64, f64), String> {
+    let (x1, y1) = chain_xy(args, "drag")?;
+    let x2 = args
+        .get(2)
+        .and_then(|v| v.parse().ok())
+        .ok_or_else(|| "chain drag 需要 x1 y1 x2 y2".to_string())?;
+    let y2 = args
+        .get(3)
+        .and_then(|v| v.parse().ok())
+        .ok_or_else(|| "chain drag 需要 x1 y1 x2 y2".to_string())?;
+    Ok((x1, y1, x2, y2))
+}
+
+/// 执行 chain 步骤序列（一次调用多步，减少模型轮次）。
+///
+/// 门禁：5 步 ≤2s（每步复用现有原语，无额外 spawn 开销）。
+pub fn run_chain(steps: &str) -> Result<Value, String> {
+    let parsed = parse_chain(steps)?;
+    let mut results: Vec<Value> = Vec::new();
+    for (action, args) in &parsed {
+        results.push(run_chain_step(action, args)?);
+    }
+    Ok(json!({
+        "ok": true,
+        "steps": parsed.len(),
+        "results": results,
+    }))
+}
+
+// ---- R4 目标状态验证（多信号任务完成判定）----
+
+/// 目标状态验证参数（R4）。
+pub struct VerifyTaskParams {
+    /// 任务前截图路径。
+    pub before: String,
+    /// 任务后截图路径。
+    pub after: String,
+    /// 期望窗口标题子串（None = 不检查标题）。
+    pub expected_title: Option<String>,
+    /// 视口区域（逻辑坐标 [x1, y1, x2, y2]，None = 不检查视口）。
+    pub viewport: Option<[f64; 4]>,
+    /// 截图差异阈值（0-1，默认 0.001）。
+    pub min_diff_ratio: f64,
+}
+
+/// 标题匹配（子串，大小写不敏感）。
+fn title_matches(title: &str, expected: &str) -> bool {
+    title.to_lowercase().contains(&expected.to_lowercase())
+}
+
+/// 查询当前聚焦窗口标题（niri msg --json windows → is_focused）。
+fn focused_window_title() -> Option<String> {
+    use std::process::Command;
+    let wins: Value = Command::new(NIRI)
+        .args(["msg", "--json", "windows"])
+        .output()
+        .ok()
+        .and_then(|o| serde_json::from_slice(&o.stdout).ok())?;
+    wins.as_array()?
+        .iter()
+        .find(|w| {
+            w.get("is_focused")
+                .and_then(|f| f.as_bool())
+                .unwrap_or(false)
+        })
+        .and_then(|w| w.get("title").and_then(|t| t.as_str()).map(String::from))
+}
+
+/// 视口区域差异（逻辑坐标 → 物理像素裁剪对比）。
+///
+/// 返回 (变化, 差异像素数, 差异比例)。视口区域超出截图范围的部分跳过。
+fn viewport_diff(
+    before: &str,
+    after: &str,
+    viewport_logical: [f64; 4],
+    min_diff_ratio: f64,
+) -> Result<(bool, u64, f64), String> {
+    use crate::image::load_rgb;
+    let b = load_rgb(std::path::Path::new(before)).map_err(|e| format!("load before: {e}"))?;
+    let a = load_rgb(std::path::Path::new(after)).map_err(|e| format!("load after: {e}"))?;
+    if b.data.len() != a.data.len() {
+        return Err(format!("尺寸不一致: {} vs {}", b.data.len(), a.data.len()));
+    }
+    // 逻辑 → 物理（截图尺寸 / 布局尺寸，与 protocol.rs 一致）
+    let (w_cap, h_cap) = (b.width as f64, b.height as f64);
+    let (w_log, h_log) = layout_size();
+    let sx = if w_log > 0 { w_cap / w_log as f64 } else { 1.0 };
+    let sy = if h_log > 0 { h_cap / h_log as f64 } else { 1.0 };
+    let (x1, y1, x2, y2) = (
+        (viewport_logical[0] * sx).round() as i64,
+        (viewport_logical[1] * sy).round() as i64,
+        (viewport_logical[2] * sx).round() as i64,
+        (viewport_logical[3] * sy).round() as i64,
+    );
+    let (x, y) = (x1.min(x2).max(0), y1.min(y2).max(0));
+    let (w, h) = (
+        (x2.abs_diff(x1)).max(1) as usize,
+        (y2.abs_diff(y1)).max(1) as usize,
+    );
+    let (bw, bh) = (b.width as usize, b.height as usize);
+    let mut diff: u64 = 0;
+    let mut total: u64 = 0;
+    for row in 0..h {
+        for col in 0..w {
+            let px = x as usize + col;
+            let py = y as usize + row;
+            if px >= bw || py >= bh {
+                continue;
+            }
+            let idx = (py * bw + px) * 3;
+            total += 1;
+            if b.data[idx..idx + 3] != a.data[idx..idx + 3] {
+                diff += 1;
+            }
+        }
+    }
+    let ratio = if total > 0 {
+        diff as f64 / total as f64
+    } else {
+        0.0
+    };
+    Ok((ratio > min_diff_ratio, diff, ratio))
+}
+
+/// 目标状态验证（R4）：截图对比 + 窗口标题 + 视口变化多信号。
+///
+/// 信号：
+/// 1. `screen_changed`：全屏截图差异 > 阈值（界面有变化）
+/// 2. `title_matched`：聚焦窗口标题包含期望子串（应用/文档正确）
+/// 3. `viewport_changed`：视口区域差异 > 阈值（3D 视图/画布内容变化）
+///
+/// 判定：`task_complete = screen_changed && title_matched(若要求) && viewport_changed(若要求)`。
+/// 返回全部信号明细（模型可解释"为什么完成/未完成"）。
+pub fn verify_task(p: &VerifyTaskParams) -> Result<Value, String> {
+    // 信号 1：全屏截图对比
+    let (screen_changed, screen_diff, screen_ratio) =
+        verify_click(&p.before, &p.after, p.min_diff_ratio)?;
+
+    // 信号 2：窗口标题（无法读取标题 → 视为未匹配，fail-closed）
+    let (title_matched, title_actual) = match &p.expected_title {
+        Some(exp) => match focused_window_title() {
+            Some(t) => (title_matches(&t, exp), Some(t)),
+            None => (false, None),
+        },
+        None => (true, None),
+    };
+
+    // 信号 3：视口变化
+    let (viewport_changed, vp_diff, vp_ratio) = match p.viewport {
+        Some(vp) => viewport_diff(&p.before, &p.after, vp, p.min_diff_ratio)?,
+        None => (true, 0, 0.0),
+    };
+
+    let complete = screen_changed && title_matched && viewport_changed;
+
+    let mut out = json!({
+        "ok": true,
+        "task_complete": complete,
+        "signals": {
+            "screen_changed": screen_changed,
+            "screen_diff_pixels": screen_diff,
+            "screen_diff_ratio": (screen_ratio * 1e6).round() / 1e6,
+            "title_matched": title_matched,
+            "viewport_changed": viewport_changed,
+            "viewport_diff_pixels": vp_diff,
+            "viewport_diff_ratio": (vp_ratio * 1e6).round() / 1e6,
+        },
+    });
+    if let Some(t) = title_actual {
+        out["signals"]["focused_title"] = json!(t);
+    }
+    if let Some(exp) = &p.expected_title {
+        out["signals"]["expected_title"] = json!(exp);
+    }
+    if let Some(vp) = p.viewport {
+        out["signals"]["viewport"] = json!(vp);
+    }
+    out["note"] = json!(format!(
+        "任务完成判定：{}（screen_changed={} title_matched={} viewport_changed={}）",
+        if complete { "完成" } else { "未完成" },
+        screen_changed,
+        title_matched,
+        viewport_changed
+    ));
+    Ok(out)
 }
 
 // ---- 五级点击降级链 ----
@@ -568,6 +878,33 @@ pub fn run(p: &GuiParams) -> Result<Value, String> {
             focus_window(&window)?;
             Ok(json!({"ok": true, "focused": window}))
         }
+        "chain" => {
+            let steps = p.steps.clone().ok_or_else(|| {
+                "chain 需要 --steps（如 \"move 100 100; click; sleep 0.3; key tab\"）".to_string()
+            })?;
+            run_chain(&steps)
+        }
+        "verify_task" => {
+            let before = p
+                .before
+                .clone()
+                .ok_or_else(|| "verify_task 需要 --before 截图路径".to_string())?;
+            let after = p
+                .after
+                .clone()
+                .ok_or_else(|| "verify_task 需要 --after 截图路径".to_string())?;
+            let viewport = p.viewport.as_deref().and_then(|s| {
+                let v: Vec<f64> = s.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+                (v.len() == 4).then(|| [v[0], v[1], v[2], v[3]])
+            });
+            verify_task(&VerifyTaskParams {
+                before,
+                after,
+                expected_title: p.expected_title.clone(),
+                viewport,
+                min_diff_ratio: 0.001,
+            })
+        }
         other => Err(format!("unknown action: {other}")),
     }
 }
@@ -726,5 +1063,267 @@ mod tests {
             "click_element 参数校验往返 {}ms >= 100ms",
             elapsed.as_millis()
         );
+    }
+
+    // ---- R2 chain 原语 ----
+
+    #[test]
+    fn chain_parse_multi_step() {
+        // "move 100 100; click; sleep 0.3; key tab" → 4 步
+        let steps = parse_chain("move 100 100; click; sleep 0.3; key tab").unwrap();
+        assert_eq!(steps.len(), 4);
+        assert_eq!(steps[0].0, "move");
+        assert_eq!(steps[0].1, vec!["100", "100"]);
+        assert_eq!(steps[1].0, "click");
+        assert!(steps[1].1.is_empty());
+        assert_eq!(steps[2].0, "sleep");
+        assert_eq!(steps[2].1, vec!["0.3"]);
+        assert_eq!(steps[3].0, "key");
+        assert_eq!(steps[3].1, vec!["tab"]);
+    }
+
+    #[test]
+    fn chain_parse_ignores_empty_and_whitespace() {
+        let steps = parse_chain("  move 1 2 ;  ; key tab  ").unwrap();
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].0, "move");
+        assert_eq!(steps[1].0, "key");
+    }
+
+    #[test]
+    fn chain_empty_rejected() {
+        assert!(parse_chain("").is_err());
+        assert!(parse_chain("   ").is_err());
+        assert!(parse_chain(";;").is_err());
+    }
+
+    #[test]
+    fn chain_unknown_action_rejected() {
+        assert!(run_chain("bogus 1 2").is_err());
+    }
+
+    #[test]
+    fn chain_requires_steps_param() {
+        let p = GuiParams {
+            action: "chain".into(),
+            ..GuiParams::default()
+        };
+        assert!(run(&p).is_err(), "chain 无 --steps 应报错");
+    }
+
+    #[test]
+    fn chain_5_steps_under_2s() {
+        // 门禁：chain 5 步 ≤2s（sleep 步骤确定性计时，无环境依赖）
+        let start = std::time::Instant::now();
+        let r = run_chain("sleep 0.1; sleep 0.1; sleep 0.1; sleep 0.1; sleep 0.1").unwrap();
+        let elapsed = start.elapsed();
+        assert_eq!(r["steps"], 5);
+        assert_eq!(r["results"].as_array().unwrap().len(), 5);
+        assert!(
+            elapsed.as_millis() < 2000,
+            "chain 5 步 {}ms >= 2000ms",
+            elapsed.as_millis()
+        );
+    }
+
+    #[test]
+    fn chain_key_joins_modifier() {
+        // key shift+a → 组合 "shift+a"（wtype -M shift -k a）
+        let steps = parse_chain("key shift+a").unwrap();
+        assert_eq!(steps[0].1, vec!["shift+a"]);
+    }
+
+    #[test]
+    fn r5_keyboard_first_template_valid() {
+        // R5 门禁：键盘优先任务模板（python/tasks/gui-blender-add.json）
+        // 1) JSON 合法 2) chain 全部为已知动作 3) 步骤数 ≤10（R1 任务模板约束）
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../python/tasks/gui-blender-add.json"
+        );
+        let text = std::fs::read_to_string(path).expect("模板文件应存在");
+        let v: Value = serde_json::from_str(&text).expect("模板应为合法 JSON");
+        assert_eq!(v["strategy"], "keyboard-first");
+        let chain = v["chain"].as_str().expect("模板应含 chain 命令");
+        let steps = parse_chain(chain).expect("模板 chain 应可解析");
+        assert!(
+            steps.len() <= 10,
+            "模板步骤 {} > 10（R1 约束）",
+            steps.len()
+        );
+        // 全部为已知 chain 动作
+        let known = [
+            "move", "click", "key", "type", "sleep", "scroll", "focus", "drag",
+        ];
+        for (action, _) in &steps {
+            assert!(known.contains(&action.as_str()), "模板含未知动作: {action}");
+        }
+        // 键盘优先模式：首步 focus + 含 key 快捷键
+        assert_eq!(steps[0].0, "focus", "键盘优先应先 focus 窗口");
+        assert!(
+            steps.iter().any(|(a, _)| a == "key"),
+            "键盘优先应含 key 快捷键步骤"
+        );
+        // verify 段存在（R4 目标状态验证）
+        assert!(v["verify"].is_object(), "模板应含 verify 段");
+    }
+
+    // ---- R4 verify_task ----
+
+    #[test]
+    fn title_matches_substring_case_insensitive() {
+        assert!(title_matches("Blender 3.6", "blender"));
+        assert!(title_matches("Blender 3.6", "Blender"));
+        assert!(!title_matches("Firefox", "Blender"));
+        assert!(title_matches("莫比乌斯环 - Blender", "莫比乌斯"));
+    }
+
+    /// 合成测试辅助：生成 w×h 纯色图，可选在物理区域 [rx1,ry1,rx2,ry2] 画黑块。
+    fn mk_img(path: &str, w: u32, h: u32, black: Option<(u32, u32, u32, u32)>) {
+        let mut img = image::RgbImage::from_pixel(w, h, image::Rgb([255, 255, 255]));
+        if let Some((x1, y1, x2, y2)) = black {
+            for y in y1..y2.min(h) {
+                for x in x1..x2.min(w) {
+                    img.put_pixel(x, y, image::Rgb([0, 0, 0]));
+                }
+            }
+        }
+        img.save(path).unwrap();
+    }
+
+    /// 逻辑视口 → 物理区域（与 viewport_diff 内部换算一致）。
+    fn vp_to_physical(vp: [f64; 4], w_cap: u32, h_cap: u32) -> (u32, u32, u32, u32) {
+        let (w_log, h_log) = layout_size();
+        let sx = if w_log > 0 {
+            w_cap as f64 / w_log as f64
+        } else {
+            1.0
+        };
+        let sy = if h_log > 0 {
+            h_cap as f64 / h_log as f64
+        } else {
+            1.0
+        };
+        (
+            (vp[0] * sx).round() as u32,
+            (vp[1] * sy).round() as u32,
+            (vp[2] * sx).round() as u32,
+            (vp[3] * sy).round() as u32,
+        )
+    }
+
+    #[test]
+    fn verify_task_synthetic_accuracy_ge_90pct() {
+        // 门禁：任务完成判定准确率 ≥90%（合成测试，10 例确定性判定）
+        let dir = "/tmp/vsd_verify_task";
+        let _ = std::fs::create_dir_all(dir);
+        let (w, h) = (100u32, 100u32);
+        // 视口 = 物理 [0,0,50,50]（逻辑坐标由换算反推）
+        let vp = [
+            0.0,
+            0.0,
+            50.0 / (w as f64 / layout_size().0 as f64),
+            50.0 / (h as f64 / layout_size().1 as f64),
+        ];
+        let (px1, py1, px2, py2) = vp_to_physical(vp, w, h);
+        assert_eq!(
+            (px1, py1, px2, py2),
+            (0, 0, 50, 50),
+            "视口换算应精确到物理 [0,0,50,50]"
+        );
+
+        let before = format!("{dir}/before.png");
+        let after_in = format!("{dir}/after_in.png");
+        let after_out = format!("{dir}/after_out.png");
+        let after_same = format!("{dir}/after_same.png");
+        let after_tiny = format!("{dir}/after_tiny.png");
+        mk_img(&before, w, h, None);
+        mk_img(&after_in, w, h, Some((0, 0, 50, 50))); // 视口内变化
+        mk_img(&after_out, w, h, Some((50, 50, 100, 100))); // 视口外变化
+        mk_img(&after_same, w, h, None); // 无变化
+        mk_img(&after_tiny, w, h, Some((0, 0, 1, 1))); // 1 像素变化（视口内，低于阈值）
+
+        let run_vt = |before: &str, after: &str, vp: Option<[f64; 4]>, min_ratio: f64| {
+            verify_task(&VerifyTaskParams {
+                before: before.into(),
+                after: after.into(),
+                expected_title: None,
+                viewport: vp,
+                min_diff_ratio: min_ratio,
+            })
+            .unwrap()
+        };
+
+        // 10 例：期望判定 (case, expected_complete)
+        type VerifyCase = (String, String, Option<[f64; 4]>, f64, bool);
+        let cases: Vec<VerifyCase> = vec![
+            // 1. 视口内变化 + 视口检查 → 完成
+            (before.clone(), after_in.clone(), Some(vp), 0.001, true),
+            // 2. 无变化 → 未完成
+            (before.clone(), after_same.clone(), Some(vp), 0.001, false),
+            // 3. 视口外变化 + 视口检查 → 未完成（视口未变）
+            (before.clone(), after_out.clone(), Some(vp), 0.001, false),
+            // 4. 视口内变化 + 无视口检查 → 完成（全屏变化）
+            (before.clone(), after_in.clone(), None, 0.001, true),
+            // 5. 视口外变化 + 无视口检查 → 完成（全屏有变化）
+            (before.clone(), after_out.clone(), None, 0.001, true),
+            // 6. 视口内变化但阈值 0.5（25% < 50%）→ 未完成
+            (before.clone(), after_in.clone(), Some(vp), 0.5, false),
+            // 7. 视口内变化 + 低阈值 → 完成
+            (before.clone(), after_in.clone(), Some(vp), 0.01, true),
+            // 8. 1 像素变化 + 阈值 0.001（0.0001 < 0.001）→ 未完成
+            (before.clone(), after_tiny.clone(), Some(vp), 0.001, false),
+            // 9. 1 像素变化 + 阈值 0.00001 → 完成
+            (before.clone(), after_tiny.clone(), Some(vp), 0.00001, true),
+            // 10. 视口内变化 + 视口检查 + 阈值 0.001 → 完成（重复确认）
+            (before.clone(), after_in.clone(), Some(vp), 0.001, true),
+        ];
+
+        let mut correct = 0;
+        for (i, (b, a, vp, min_ratio, expected)) in cases.iter().enumerate() {
+            let r = run_vt(b, a, *vp, *min_ratio);
+            let got = r["task_complete"].as_bool().unwrap();
+            assert_eq!(
+                got,
+                *expected,
+                "case {}: 期望 complete={} 实际 {}（signals={}）",
+                i + 1,
+                expected,
+                got,
+                r["signals"]
+            );
+            if got == *expected {
+                correct += 1;
+            }
+        }
+        let acc = correct as f64 / cases.len() as f64;
+        assert!(
+            acc >= 0.9,
+            "任务完成判定准确率 {:.0}% < 90%（{}/{}）",
+            acc * 100.0,
+            correct,
+            cases.len()
+        );
+    }
+
+    #[test]
+    fn verify_task_requires_before_after() {
+        let p = GuiParams {
+            action: "verify_task".into(),
+            ..GuiParams::default()
+        };
+        assert!(run(&p).is_err(), "verify_task 缺 --before/--after 应报错");
+    }
+
+    #[test]
+    fn verify_task_missing_files_rejected() {
+        let r = verify_task(&VerifyTaskParams {
+            before: "/tmp/no_such_before.png".into(),
+            after: "/tmp/no_such_after.png".into(),
+            expected_title: None,
+            viewport: None,
+            min_diff_ratio: 0.001,
+        });
+        assert!(r.is_err(), "截图文件不存在应报错");
     }
 }

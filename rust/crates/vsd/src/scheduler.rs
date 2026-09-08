@@ -60,6 +60,15 @@ pub fn model_budgets() -> HashMap<String, ModelBudget> {
             cpu_ok: true,
         },
     );
+    // R3：analyze 任务（a11y 优先无 DL；DL 兜底时按 omniparser 预算）
+    m.insert(
+        "analyze".into(),
+        ModelBudget {
+            vram_reserve: 2.0,
+            vram_peak: 3.0,
+            cpu_ok: true,
+        },
+    );
     m
 }
 

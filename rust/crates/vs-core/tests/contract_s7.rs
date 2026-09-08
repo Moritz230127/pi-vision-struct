@@ -51,7 +51,12 @@ fn capture_contract_shape() {
         Ok(report) => {
             assert_envelope_shape(&report, "capture", "screen_px");
             assert_eq!(report["source"]["type"], "screen");
-            assert_eq!(report["source"]["backend"], "xcap");
+            // 后端：grim（主）或 xcap（兜底）
+            let backend = report["source"]["backend"].as_str().unwrap_or("");
+            assert!(
+                backend == "grim" || backend == "xcap",
+                "capture 后端应为 grim/xcap，实际 {backend}"
+            );
             assert!(report["metrics"]["size_px"].is_array());
         }
         Err(e) => {

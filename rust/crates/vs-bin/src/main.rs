@@ -257,78 +257,11 @@ enum Command {
         max_files: u32,
     },
     /// 任务引擎：按 JSON 配置编排传感器与融合算子。
-    Analyze {
-        #[arg(long)]
-        task: String,
-        #[arg(long)]
-        input: Option<String>,
-        #[arg(long)]
-        url: Option<String>,
-        #[arg(long)]
-        compare: Option<String>,
-        #[arg(long)]
-        prompt: Option<String>,
-        #[arg(long, default_value_t = 1.0)]
-        dpr: f64,
-    },
+    Analyze(Box<AnalyzeArgs>),
     /// 多轮反馈协议：analyze / zoom / probe / click [N]。
-    Protocol {
-        #[arg(long)]
-        action: String,
-        #[arg(long)]
-        image: PathBuf,
-        #[arg(long)]
-        region: Option<String>,
-        #[arg(long)]
-        bbox: Option<String>,
-        #[arg(long)]
-        sensor: Option<String>,
-        /// probe 确认模式 / click 编号引用：对指定融合元素 id 操作（E6/G1）。
-        #[arg(long)]
-        confirm: Option<String>,
-        /// G3 闭环验证：click 后截图对比（verify_click）。
-        #[arg(long)]
-        verify_click: bool,
-        /// G4 窗口过滤：只分析指定 niri 窗口 id 区域（排除终端/其他窗口内容）。
-        #[arg(long)]
-        window: Option<String>,
-    },
+    Protocol(Box<ProtocolArgs>),
     /// GUI 行动层（plan4 G1）：click/type/key/drag/scroll/focus（wlrctl serve）。
-    Gui {
-        #[arg(long)]
-        action: String,
-        /// 元素编号（click_element 用，五级降级链入口）。
-        #[arg(long)]
-        element_id: Option<usize>,
-        #[arg(long)]
-        x: Option<f64>,
-        #[arg(long)]
-        y: Option<f64>,
-        #[arg(long)]
-        text: Option<String>,
-        #[arg(long)]
-        combo: Option<String>,
-        #[arg(long, default_value = "left")]
-        button: String,
-        #[arg(long)]
-        x1: Option<f64>,
-        #[arg(long)]
-        y1: Option<f64>,
-        #[arg(long)]
-        x2: Option<f64>,
-        #[arg(long)]
-        y2: Option<f64>,
-        #[arg(long)]
-        dy: Option<f64>,
-        #[arg(long)]
-        dx: Option<f64>,
-        #[arg(long)]
-        window: Option<String>,
-        /// 点击验证（verify_click 闭环）。
-        #[arg(long)]
-        verify: bool,
-    },
-    /// 三维装配审计（OBB-SAT + kd-tree 点云距离）。
+    Gui(Box<GuiArgs>),
     Audit3d {
         #[arg(long)]
         report: String,
@@ -341,6 +274,99 @@ enum Command {
     Check,
     /// 安装引导（模型目录创建 + 下载 URL 提示）。
     Setup,
+}
+
+/// Gui 子命令参数（Box 包裹避免 clippy large-size-difference）。
+#[derive(clap::Args)]
+struct GuiArgs {
+    #[arg(long)]
+    action: String,
+    /// 元素编号（click_element 用，五级降级链入口）。
+    #[arg(long)]
+    element_id: Option<usize>,
+    #[arg(long)]
+    x: Option<f64>,
+    #[arg(long)]
+    y: Option<f64>,
+    #[arg(long)]
+    text: Option<String>,
+    #[arg(long)]
+    combo: Option<String>,
+    #[arg(long, default_value = "left")]
+    button: String,
+    #[arg(long)]
+    x1: Option<f64>,
+    #[arg(long)]
+    y1: Option<f64>,
+    #[arg(long)]
+    x2: Option<f64>,
+    #[arg(long)]
+    y2: Option<f64>,
+    #[arg(long)]
+    dy: Option<f64>,
+    #[arg(long)]
+    dx: Option<f64>,
+    #[arg(long)]
+    window: Option<String>,
+    /// 点击验证（verify_click 闭环）。
+    #[arg(long)]
+    verify: bool,
+    /// R2 chain：多步动作序列（"move 100 100; click; sleep 0.3; key tab"）。
+    #[arg(long)]
+    steps: Option<String>,
+    /// R4 verify_task：任务前截图路径。
+    #[arg(long)]
+    before: Option<String>,
+    /// R4 verify_task：任务后截图路径。
+    #[arg(long)]
+    after: Option<String>,
+    /// R4 verify_task：期望窗口标题子串。
+    #[arg(long)]
+    expected_title: Option<String>,
+    /// R4 verify_task：视口区域（逻辑坐标 "x1,y1,x2,y2"）。
+    #[arg(long)]
+    viewport: Option<String>,
+}
+
+/// Analyze 子命令参数（Box 包裹避免 clippy large-size-difference）。
+#[derive(clap::Args)]
+struct AnalyzeArgs {
+    #[arg(long)]
+    task: String,
+    #[arg(long)]
+    input: Option<String>,
+    #[arg(long)]
+    url: Option<String>,
+    #[arg(long)]
+    compare: Option<String>,
+    #[arg(long)]
+    prompt: Option<String>,
+    #[arg(long, default_value_t = 1.0)]
+    dpr: f64,
+}
+
+/// Protocol 子命令参数（Box 包裹避免 clippy large-size-difference）。
+#[derive(clap::Args)]
+struct ProtocolArgs {
+    #[arg(long)]
+    action: String,
+    #[arg(long)]
+    image: PathBuf,
+    #[arg(long)]
+    region: Option<String>,
+    #[arg(long)]
+    bbox: Option<String>,
+    #[arg(long)]
+    sensor: Option<String>,
+    /// probe 确认模式 / click 编号引用：对指定融合元素 id 操作（E6/G1）。
+    #[arg(long)]
+    confirm: Option<String>,
+    /// G3 闭环验证：click 后截图对比（verify_click）。
+    #[arg(long)]
+    verify_click: bool,
+    /// G4 窗口过滤：只分析指定 niri 窗口 id 区域（排除终端/其他窗口内容）。
+    #[arg(long)]
+    window: Option<String>,
 }
 
 fn main() {
@@ -597,74 +623,47 @@ fn main() {
             },
         )
         .unwrap_or_else(|e| json!({"error": "vs_wall failed", "detail": e})),
-        Command::Analyze {
-            task,
-            input,
-            url,
-            compare,
-            prompt,
-            dpr,
-        } => analyze::run(&analyze::AnalyzeParams {
-            task,
-            input,
-            url,
-            compare,
-            prompt,
-            dpr,
+        Command::Analyze(args) => analyze::run(&analyze::AnalyzeParams {
+            task: args.task.clone(),
+            input: args.input.clone(),
+            url: args.url.clone(),
+            compare: args.compare.clone(),
+            prompt: args.prompt.clone(),
+            dpr: args.dpr,
         })
         .unwrap_or_else(|e| json!({"error": "vs_analyze failed", "detail": e})),
-        Command::Protocol {
-            action,
-            image,
-            region,
-            bbox,
-            sensor,
-            confirm,
-            verify_click,
-            window,
-        } => protocol::run(&protocol::ProtocolParams {
-            action,
-            image: image.to_string_lossy().into_owned(),
-            region,
-            bbox,
-            sensor,
-            confirm,
-            verify_click,
-            window,
+        Command::Protocol(args) => protocol::run(&protocol::ProtocolParams {
+            action: args.action.clone(),
+            image: args.image.to_string_lossy().into_owned(),
+            region: args.region.clone(),
+            bbox: args.bbox.clone(),
+            sensor: args.sensor.clone(),
+            confirm: args.confirm.clone(),
+            verify_click: args.verify_click,
+            window: args.window.clone(),
         })
         .unwrap_or_else(|e| json!({"error": "vs_protocol failed", "detail": e})),
-        Command::Gui {
-            action,
-            element_id,
-            x,
-            y,
-            text,
-            combo,
-            button,
-            x1,
-            y1,
-            x2,
-            y2,
-            dy,
-            dx,
-            window,
-            verify,
-        } => gui::run(&gui::GuiParams {
-            action,
-            element_id,
-            x,
-            y,
-            text,
-            combo,
-            button: Some(button),
-            x1,
-            y1,
-            x2,
-            y2,
-            dy,
-            dx,
-            window,
-            verify,
+        Command::Gui(args) => gui::run(&gui::GuiParams {
+            action: args.action.clone(),
+            element_id: args.element_id,
+            x: args.x,
+            y: args.y,
+            text: args.text.clone(),
+            combo: args.combo.clone(),
+            button: Some(args.button.clone()),
+            x1: args.x1,
+            y1: args.y1,
+            x2: args.x2,
+            y2: args.y2,
+            dy: args.dy,
+            dx: args.dx,
+            window: args.window.clone(),
+            verify: args.verify,
+            steps: args.steps.clone(),
+            before: args.before.clone(),
+            after: args.after.clone(),
+            expected_title: args.expected_title.clone(),
+            viewport: args.viewport.clone(),
         })
         .unwrap_or_else(|e| json!({"error": "vs_gui failed", "detail": e})),
         Command::Audit3d {
