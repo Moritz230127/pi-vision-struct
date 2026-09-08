@@ -57,7 +57,7 @@ fn analyze(image: &str) -> Result<Value, String> {
     // F2（plan5）：a11y 树优先——先跑 AT-SPI（~100ms），有元素则用 a11y（无 DL）
     if let Ok(a11y_report) = crate::a11y::run(&crate::a11y::A11yParams {
         app: None,
-        max_items: 60,
+        max_items: 200,
     }) {
         let a11y_els = a11y_report
             .get("elements")
@@ -89,6 +89,34 @@ fn analyze_a11y_only(image: &str, a11y_report: Value) -> Result<Value, String> {
         .and_then(|e| e.as_array())
         .cloned()
         .unwrap_or_default();
+    // F7：过滤不可见/非交互元素（-1 bbox 的 menu 等），保证 truncate 后保留可点击元素
+    // （Firefox 树前 26 个 menu 均无 bbox，直接截断会丢掉 entry/link）
+    elements.retain(|e| {
+        let b = e
+            .get("bbox")
+            .and_then(|b| b.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let visible = b.len() >= 4
+            && b[2].as_f64().unwrap_or(0.0) > b[0].as_f64().unwrap_or(0.0)
+            && b[3].as_f64().unwrap_or(0.0) > b[1].as_f64().unwrap_or(0.0);
+        if !visible {
+            return false;
+        }
+        let ty = e.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let has_text = e
+            .get("text")
+            .and_then(|t| t.as_str())
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        const INTERACTIVE: &[&str] = &[
+            "entry", "text", "push button", "toggle button", "button", "link",
+            "check box", "combo box", "slider", "radio button", "menu item",
+            "list item", "heading", "paragraph", "label", "image", "table", "row",
+            "cell",
+        ];
+        has_text || INTERACTIVE.contains(&ty)
+    });
     for (i, e) in elements.iter_mut().enumerate() {
         e["id"] = json!(i);
         // center = bbox 中心
@@ -123,7 +151,7 @@ fn analyze_a11y_only(image: &str, a11y_report: Value) -> Result<Value, String> {
         }
     }
     // token 治理：top-15 截断（与 DL 路径一致）
-    elements.truncate(10);
+    elements.truncate(15);
     // 2) scene_stats 摘要（metrics 精简）
     let stats = crate::scene_stats::run(img, &crate::scene_stats::SceneStatsParams { colors: 8 });
     let stats_metrics = stats
@@ -436,7 +464,7 @@ fn analyze_window(image: &str, window_id: &str) -> Result<Value, String> {
         // 窗口 app_id → a11y 树（~100ms，无 DL）
         match crate::a11y::run(&crate::a11y::A11yParams {
             app: Some(app_id.clone()),
-            max_items: 60,
+            max_items: 200,
         }) {
             Ok(a11y_report) => {
                 let a11y_els = a11y_report
