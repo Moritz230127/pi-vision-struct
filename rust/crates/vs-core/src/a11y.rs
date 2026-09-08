@@ -257,21 +257,6 @@ pub fn run(p: &A11yParams) -> Result<Value, String> {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a11y_params_default() {
-        let p = A11yParams {
-            app: None,
-            max_items: 80,
-        };
-        assert!(p.app.is_none());
-        assert_eq!(p.max_items, 80);
-    }
-}
-
 // ---- F3：bus/path 直接定位（click 路径用，替代全局树遍历）----
 
 /// 通过 bus name + path 直接调用 GetExtents（F3：click 路径直接定位）。
@@ -353,4 +338,19 @@ pub async fn do_action_zbus_path(
         }
     }
     Err(last_err)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a11y_params_default() {
+        let p = A11yParams {
+            app: None,
+            max_items: 80,
+        };
+        assert!(p.app.is_none());
+        assert_eq!(p.max_items, 80);
+    }
 }
