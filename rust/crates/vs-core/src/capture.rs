@@ -13,6 +13,8 @@ pub struct CaptureParams {
     pub region: Option<[u32; 4]>,
     /// 输出 PNG 路径。
     pub out: String,
+    /// F5（plan5）：窗口级截图（niri screenshot-window --id）。
+    pub window: Option<String>,
 }
 
 /// 截屏并输出 schema v3 envelope。
@@ -23,6 +25,7 @@ pub fn run(p: &CaptureParams) -> Result<Value, String> {
     let p = CaptureParams {
         region: p.region,
         out: p.out.clone(),
+        window: p.window.clone(),
     };
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -49,6 +52,43 @@ fn capture_inner(p: &CaptureParams) -> Result<Value, String> {
 
 /// grim 截图（Wayland screencopy，niri 环境可靠）。
 fn capture_grim(p: &CaptureParams) -> Result<Value, String> {
+    // F5：窗口级截图（niri screenshot-window --id，保存到配置路径后复制）
+    if let Some(wid) = &p.window {
+        let st = std::process::Command::new("niri")
+            .args(["msg", "action", "screenshot-window", "--id", wid])
+            .status()
+            .map_err(|e| format!("spawn niri screenshot-window: {e}"))?;
+        if !st.success() {
+            return Err("niri screenshot-window 失败".into());
+        }
+        // 找最新截图（配置路径 ~/Pictures/Screenshots/Niri-screenshots/）
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+        let dir = format!("{home}/Pictures/Screenshots/Niri-screenshots");
+        let latest = std::fs::read_dir(&dir)
+            .map_err(|e| format!("read_dir {dir}: {e}"))?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map(|x| x == "png").unwrap_or(false))
+            .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
+            .map(|e| e.path())
+            .ok_or_else(|| format!("无截图文件: {dir}"))?;
+        std::fs::copy(&latest, &p.out).map_err(|e| format!("copy {latest:?}: {e}"))?;
+        // 窗口级截图：返回 envelope（尺寸从复制后的图读）
+        let img = image::open(&p.out).map_err(|_e| format!("open {}", p.out))?;
+        let (w, h) = (img.width(), img.height());
+        let mut report = envelope(
+            Some("capture"),
+            &["niri"],
+            Some("screen_px"),
+            Some(json!({
+                "type": "window",
+                "path": p.out,
+                "size_px": [w, h],
+                "backend": "niri screenshot-window",
+            })),
+        );
+        report["metrics"] = json!({"size_px": [w, h]});
+        return Ok(report);
+    }
     let out = std::process::Command::new("grim")
         .arg(&p.out)
         .output()
@@ -146,6 +186,7 @@ mod tests {
         let p = CaptureParams {
             region: None,
             out: "/tmp/vsd_capture_test.png".into(),
+            window: None,
         };
         assert!(p.region.is_none());
         assert_eq!(p.out, "/tmp/vsd_capture_test.png");

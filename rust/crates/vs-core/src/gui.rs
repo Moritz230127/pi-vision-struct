@@ -385,6 +385,7 @@ pub fn click_with_verify(
         crate::capture::run(&crate::capture::CaptureParams {
             region: None,
             out: before.clone(),
+            window: None,
         })
         .map_err(|e| format!("capture before: {e}"))?;
         // 执行点击（五级降级链）
@@ -394,6 +395,7 @@ pub fn click_with_verify(
         crate::capture::run(&crate::capture::CaptureParams {
             region: None,
             out: after.clone(),
+            window: None,
         })
         .map_err(|e| format!("capture after: {e}"))?;
         // 对比

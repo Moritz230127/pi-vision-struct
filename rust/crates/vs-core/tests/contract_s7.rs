@@ -45,6 +45,7 @@ fn capture_contract_shape() {
     let v = vs_core::capture::run(&vs_core::capture::CaptureParams {
         region: None,
         out: "/tmp/vs_contract_capture.png".into(),
+        window: None,
     });
     match v {
         Ok(report) => {
@@ -72,6 +73,7 @@ fn capture_contract_nonempty_when_env() {
     let v = vs_core::capture::run(&vs_core::capture::CaptureParams {
         region: None,
         out: "/tmp/vs_contract_capture.png".into(),
+        window: None,
     })
     .expect("capture 应成功");
     let size = v["metrics"]["size_px"].as_array().unwrap();

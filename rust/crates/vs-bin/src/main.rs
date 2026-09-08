@@ -171,6 +171,9 @@ enum Command {
         /// 输出 PNG 路径
         #[arg(long, default_value = "/tmp/vs_capture.png")]
         out: String,
+        /// F5：窗口级截图（niri screenshot-window --id）
+        #[arg(long)]
+        window: Option<String>,
     },
     /// DOM 提取（chromiumoxide 驱动 headless Chrome）。
     Dom {
@@ -493,11 +496,16 @@ fn main() {
             },
         )
         .unwrap_or_else(|e| json!({"error": "vs_ocr failed", "detail": e})),
-        Command::Capture { region, out } => capture::run(&capture::CaptureParams {
+        Command::Capture {
+            region,
+            out,
+            window,
+        } => capture::run(&capture::CaptureParams {
             region: region.as_deref().and_then(|s| {
                 let p: Vec<u32> = s.split(',').filter_map(|v| v.trim().parse().ok()).collect();
                 (p.len() == 4).then(|| [p[0], p[1], p[2], p[3]])
             }),
+            window,
             out,
         })
         .unwrap_or_else(|e| json!({"error": "vs_capture failed", "detail": e})),

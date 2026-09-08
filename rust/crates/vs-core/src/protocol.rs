@@ -40,7 +40,20 @@ pub struct ProtocolParams {
 /// 只返回：融合元素清单（element_fusion）+ scene_stats 摘要 + edge density 热图。
 /// 不返回：原始 ocr/omniparser/detect 元素、edge_point、ascii 全栅格。
 /// 目标：总输出 < 3K tokens（两级感知预算的"粗"层）。
+/// 全局感知缓存（F6：增量感知——事件触发重扫，查询命中缓存）。
+static PERCEPTION_CACHE: std::sync::OnceLock<crate::events::PerceptionCache> =
+    std::sync::OnceLock::new();
+
+/// 获取全局感知缓存。
+pub fn perception_cache() -> &'static crate::events::PerceptionCache {
+    PERCEPTION_CACHE.get_or_init(crate::events::PerceptionCache::new)
+}
+
 fn analyze(image: &str) -> Result<Value, String> {
+    // F6：缓存命中直接返回（同窗口连续 analyze ≤1s）
+    if let Some(cached) = perception_cache().get(image) {
+        return Ok(cached);
+    }
     // F2（plan5）：a11y 树优先——先跑 AT-SPI（~100ms），有元素则用 a11y（无 DL）
     if let Ok(a11y_report) = crate::a11y::run(&crate::a11y::A11yParams {
         app: None,
@@ -52,11 +65,19 @@ fn analyze(image: &str) -> Result<Value, String> {
             .cloned()
             .unwrap_or_default();
         if !a11y_els.is_empty() {
-            return analyze_a11y_only(image, a11y_report);
+            let r = analyze_a11y_only(image, a11y_report);
+            if let Ok(report) = &r {
+                perception_cache().put(image, report.clone());
+            }
+            return r;
         }
     }
     // 降级：a11y 空 → DL 融合（现有路径）
-    analyze_dl(image)
+    let r = analyze_dl(image);
+    if let Ok(report) = &r {
+        perception_cache().put(image, report.clone());
+    }
+    r
 }
 
 /// a11y 优先路径：a11y 元素 + scene_stats 摘要（无 DL 推理，≤1s）。
@@ -102,7 +123,7 @@ fn analyze_a11y_only(image: &str, a11y_report: Value) -> Result<Value, String> {
         }
     }
     // token 治理：top-15 截断（与 DL 路径一致）
-    elements.truncate(15);
+    elements.truncate(10);
     // 2) scene_stats 摘要（metrics 精简）
     let stats = crate::scene_stats::run(img, &crate::scene_stats::SceneStatsParams { colors: 8 });
     let stats_metrics = stats
@@ -214,7 +235,7 @@ fn analyze_dl(image: &str) -> Result<Value, String> {
             let cb = b.get("conf").and_then(|c| c.as_f64()).unwrap_or(0.0);
             cb.partial_cmp(&ca).unwrap_or(std::cmp::Ordering::Equal)
         });
-        els.truncate(15);
+        els.truncate(10);
         for e in els.iter_mut() {
             let keep = [
                 "id",
@@ -962,12 +983,7 @@ pub fn run(p: &ProtocolParams) -> Result<Value, String> {
                     )
                 })
                 .unwrap_or((None, None));
-            let r = crate::gui::click_element(
-                id,
-                fallback,
-                bus.as_deref(),
-                path.as_deref(),
-            )?;
+            let r = crate::gui::click_element(id, fallback, bus.as_deref(), path.as_deref())?;
             // 闭环：返回元素信息 + 点击结果
             let mut out = r.clone();
             out["element_id"] = json!(id);

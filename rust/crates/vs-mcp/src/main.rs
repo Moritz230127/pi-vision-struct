@@ -191,6 +191,7 @@ impl VsToolHandler {
         capture::run(&capture::CaptureParams {
             region: parse_region(p.region.as_deref()),
             out: p.out.unwrap_or_else(|| "/tmp/vs_capture.png".into()),
+            window: None,
         })
         .map(Json)
     }
