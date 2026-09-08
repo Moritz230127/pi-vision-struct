@@ -21,6 +21,8 @@ pub struct ProtocolParams {
     pub sensor: Option<String>,
     /// probe 确认模式：对指定融合元素 id 重新检测（E6 确定性锚点）。
     pub confirm: Option<String>,
+    /// G3 闭环验证：click 后截图对比（verify_click）。
+    pub verify_click: bool,
 }
 
 /// analyze：粗报告（plan3 E3 分层感知——默认轻量路径）。
@@ -105,6 +107,26 @@ fn analyze(image: &str) -> Result<Value, String> {
         .as_ref()
         .map(|v| v.get("elements").cloned().unwrap_or(json!([])))
         .unwrap_or(json!([]));
+    // G3 token 治理：元素截断 top-20（按 conf 降序）+ 精简字段
+    if let Some(els) = report["elements"].as_array_mut() {
+        els.sort_by(|a, b| {
+            let ca = a.get("conf").and_then(|c| c.as_f64()).unwrap_or(0.0);
+            let cb = b.get("conf").and_then(|c| c.as_f64()).unwrap_or(0.0);
+            cb.partial_cmp(&ca).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        els.truncate(15);
+        for e in els.iter_mut() {
+            let keep = ["id", "bbox", "center", "text", "caption", "conf", "sources"];
+            if let Some(obj) = e.as_object_mut() {
+                obj.retain(|k, _| keep.contains(&k.as_str()));
+                // caption 截断 40 字符（token 治理）
+                if let Some(cap) = obj.get_mut("caption").and_then(|c| c.as_str()) {
+                    let short: String = cap.chars().take(40).collect();
+                    obj.insert("caption".into(), json!(short));
+                }
+            }
+        }
+    }
     report["metrics"] = json!({
         "scene": stats_summary,
         "edge": edge_metrics,
@@ -615,6 +637,19 @@ pub fn run(p: &ProtocolParams) -> Result<Value, String> {
             if let Some((x, y)) = fallback {
                 out["element_center"] = json!([x, y]);
             }
+            // G3 闭环验证：click → verify_click（截图对比）→ 失败重试
+            if p.verify_click {
+                let cap = "/tmp/vsd_verify";
+                match crate::gui::click_with_verify(id, fallback, cap, 0.001, 2) {
+                    Ok(v) => {
+                        out["verify_click"] = v.get("verify").cloned().unwrap_or(json!(null));
+                        out["attempts"] = v.get("attempts").cloned().unwrap_or(json!([]));
+                    }
+                    Err(e) => {
+                        out["verify_click"] = json!({"ok": false, "error": e});
+                    }
+                }
+            }
             Ok(out)
         }
         other => Err(format!("unknown action: {other}")),
@@ -634,6 +669,7 @@ mod tests {
             bbox: None,
             sensor: None,
             confirm: None,
+            verify_click: false,
         };
         assert!(run(&p).is_err());
     }
@@ -647,6 +683,7 @@ mod tests {
             bbox: None,
             sensor: None,
             confirm: None,
+            verify_click: false,
         };
         assert!(run(&p).is_err());
     }
@@ -660,6 +697,7 @@ mod tests {
             bbox: None,
             sensor: None,
             confirm: None,
+            verify_click: false,
         };
         assert!(run(&p).is_err());
     }
@@ -673,6 +711,7 @@ mod tests {
             bbox: None,
             sensor: None,
             confirm: None,
+            verify_click: false,
         };
         assert!(run(&p).is_err());
     }
@@ -687,6 +726,7 @@ mod tests {
             bbox: None,
             sensor: None,
             confirm: Some("abc".into()),
+            verify_click: false,
         };
         assert!(run(&p).is_err(), "confirm 非整数应报错");
     }
@@ -705,6 +745,7 @@ mod tests {
             bbox: None,
             sensor: None,
             confirm: Some("999".into()),
+            verify_click: false,
         };
         assert!(run(&p).is_err(), "confirm 超范围 id 应报错");
     }
@@ -723,6 +764,7 @@ mod tests {
             bbox: None,
             sensor: None,
             confirm: Some("0".into()),
+            verify_click: false,
         };
         let r = run(&p).unwrap();
         assert_eq!(r["confirmed"], true, "已知元素应确认");
@@ -745,6 +787,7 @@ mod tests {
             bbox: None,
             sensor: None,
             confirm: None,
+            verify_click: false,
         };
         let r = run(&p).unwrap();
         let note = r["note"].as_str().unwrap();
@@ -770,6 +813,7 @@ mod tests {
             bbox: None,
             sensor: None,
             confirm: None,
+            verify_click: false,
         };
         let r = run(&p).unwrap();
         assert!(r.get("ascii").is_none(), "analyze 不应返回 ascii 全栅格");
@@ -810,6 +854,7 @@ mod tests {
             bbox: None,
             sensor: None,
             confirm: None,
+            verify_click: false,
         };
         let r = run(&p).unwrap();
         assert_eq!(r["source"]["upscale"], 2, "zoom 应 2× upscale");

@@ -283,6 +283,9 @@ enum Command {
         /// probe 确认模式 / click 编号引用：对指定融合元素 id 操作（E6/G1）。
         #[arg(long)]
         confirm: Option<String>,
+        /// G3 闭环验证：click 后截图对比（verify_click）。
+        #[arg(long)]
+        verify_click: bool,
     },
     /// GUI 行动层（plan4 G1）：click/type/key/drag/scroll/focus（wlrctl serve）。
     Gui {
@@ -606,6 +609,7 @@ fn main() {
             bbox,
             sensor,
             confirm,
+            verify_click,
         } => protocol::run(&protocol::ProtocolParams {
             action,
             image: image.to_string_lossy().into_owned(),
@@ -613,6 +617,7 @@ fn main() {
             bbox,
             sensor,
             confirm,
+            verify_click,
         })
         .unwrap_or_else(|e| json!({"error": "vs_protocol failed", "detail": e})),
         Command::Gui {

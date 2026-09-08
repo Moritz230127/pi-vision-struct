@@ -153,6 +153,7 @@ fn protocol_analyze_matches_python() {
         bbox: None,
         sensor: None,
         confirm: None,
+        verify_click: false,
     })
     .expect("protocol analyze 失败");
 
@@ -187,6 +188,7 @@ fn protocol_zoom_matches_python() {
         bbox: None,
         sensor: None,
         confirm: None,
+        verify_click: false,
     })
     .expect("protocol zoom 失败");
 
@@ -216,6 +218,7 @@ fn protocol_probe_matches_python() {
         bbox: Some("100,80,320,300".into()),
         sensor: Some("ocr".into()),
         confirm: None,
+        verify_click: false,
     })
     .expect("protocol probe 失败");
 

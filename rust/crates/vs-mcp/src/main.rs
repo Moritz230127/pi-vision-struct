@@ -518,6 +518,7 @@ impl VsToolHandler {
             bbox: p.bbox,
             sensor: p.sensor,
             confirm: p.confirm,
+            verify_click: false,
         })
         .map(Json)
     }

@@ -10,10 +10,70 @@
 //! 输出事件序列。vsd daemon 集成：事件 → 触发增量再感知 → 缓存更新。
 
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::io::BufRead;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+/// 感知缓存（G3 增量再感知）：image path → 最近 analyze 结果。
+///
+/// 事件触发时对缓存中的 image 重新 analyze（增量重扫），查询时返回最新。
+#[derive(Clone, Default)]
+pub struct PerceptionCache {
+    inner: Arc<Mutex<HashMap<String, Value>>>,
+}
+
+impl PerceptionCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 存入（image path → analyze 结果）。
+    pub fn put(&self, image: &str, report: Value) {
+        self.inner.lock().unwrap().insert(image.to_string(), report);
+    }
+
+    /// 读取（无缓存返回 None）。
+    pub fn get(&self, image: &str) -> Option<Value> {
+        self.inner.lock().unwrap().get(image).cloned()
+    }
+
+    /// 全部缓存条目数。
+    pub fn len(&self) -> usize {
+        self.inner.lock().unwrap().len()
+    }
+
+    /// 是否为空。
+    pub fn is_empty(&self) -> bool {
+        self.inner.lock().unwrap().is_empty()
+    }
+
+    /// 清空。
+    pub fn clear(&self) {
+        self.inner.lock().unwrap().clear();
+    }
+
+    /// 事件触发增量再感知：对缓存中所有 image 重新 analyze，更新缓存。
+    ///
+    /// 返回 (重扫数, 失败数)。analyze 失败时保留旧缓存（不覆盖）。
+    pub fn reperceive(&self, analyze_fn: &dyn Fn(&str) -> Result<Value, String>) -> (usize, usize) {
+        let images: Vec<String> = self.inner.lock().unwrap().keys().cloned().collect();
+        let mut ok = 0;
+        let mut fail = 0;
+        for img in &images {
+            match analyze_fn(img) {
+                Ok(report) => {
+                    self.put(img, report);
+                    ok += 1;
+                }
+                Err(_) => fail += 1, // 保留旧缓存
+            }
+        }
+        (ok, fail)
+    }
+}
 
 /// 事件类型（niri event-stream 行前缀）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -242,5 +302,35 @@ mod tests {
         }
         // 合并后应保留最后一个触发再感知的事件
         assert_eq!(merged, NiriEvent::WindowsChanged);
+    }
+
+    #[test]
+    fn perception_cache_put_get() {
+        let c = PerceptionCache::new();
+        assert!(c.get("/tmp/a.png").is_none());
+        c.put("/tmp/a.png", json!({"elements": []}));
+        assert_eq!(c.len(), 1);
+        assert!(c.get("/tmp/a.png").is_some());
+        c.clear();
+        assert_eq!(c.len(), 0);
+    }
+
+    #[test]
+    fn perception_cache_reperceive_updates() {
+        let c = PerceptionCache::new();
+        c.put("/tmp/a.png", json!({"version": 1}));
+        c.put("/tmp/b.png", json!({"version": 1}));
+        // 再感知：a 成功（version 2），b 失败（保留旧）
+        let (ok, fail) = c.reperceive(&|img| {
+            if img.ends_with("a.png") {
+                Ok(json!({"version": 2}))
+            } else {
+                Err("analyze failed".into())
+            }
+        });
+        assert_eq!(ok, 1);
+        assert_eq!(fail, 1);
+        assert_eq!(c.get("/tmp/a.png").unwrap()["version"], 2);
+        assert_eq!(c.get("/tmp/b.png").unwrap()["version"], 1); // 保留旧
     }
 }

@@ -40,6 +40,59 @@ pub fn run(p: &CaptureParams) -> Result<Value, String> {
 }
 
 fn capture_inner(p: &CaptureParams) -> Result<Value, String> {
+    // 优先 grim（Wayland 可靠）；失败降级 xcap
+    if let Ok(v) = capture_grim(p) {
+        return Ok(v);
+    }
+    capture_xcap(p)
+}
+
+/// grim 截图（Wayland screencopy，niri 环境可靠）。
+fn capture_grim(p: &CaptureParams) -> Result<Value, String> {
+    let out = std::process::Command::new("grim")
+        .arg(&p.out)
+        .output()
+        .map_err(|e| format!("spawn grim: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "grim failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+                .chars()
+                .take(200)
+                .collect::<String>()
+        ));
+    }
+    // 区域裁剪（grim 全屏 → 按 region 裁剪）
+    let full = image::open(&p.out).map_err(|_e| format!("open {}", p.out))?;
+    let img = match p.region {
+        Some([x1, y1, x2, y2]) => {
+            let (x, y) = (x1.min(x2), y1.min(y2));
+            let (w, h) = (x2.abs_diff(x1), y2.abs_diff(y1));
+            let cropped = image::imageops::crop_imm(&full, x, y, w, h).to_image();
+            image::DynamicImage::ImageRgba8(cropped).to_rgb8()
+        }
+        None => full.to_rgb8(),
+    };
+    img.save(&p.out)
+        .map_err(|e| format!("save {}: {e}", p.out))?;
+    let (w, h) = (img.width(), img.height());
+    let mut report = envelope(
+        Some("capture"),
+        &["grim"],
+        Some("screen_px"),
+        Some(json!({
+            "type": "screen",
+            "path": p.out,
+            "size_px": [w, h],
+            "backend": "grim",
+        })),
+    );
+    report["metrics"] = json!({"size_px": [w, h]});
+    Ok(report)
+}
+
+/// xcap 截图（跨平台兜底）。
+fn capture_xcap(p: &CaptureParams) -> Result<Value, String> {
     use xcap::Monitor;
 
     let monitors = Monitor::all().map_err(|e| format!("xcap Monitor::all: {e}"))?;

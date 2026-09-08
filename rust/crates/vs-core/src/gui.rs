@@ -337,6 +337,86 @@ pub fn click_element(element_id: usize, fallback_xy: Option<(f64, f64)>) -> Resu
     Err(format!("五级降级链全部失败: {}", chain.join(" → ")))
 }
 
+/// 闭环验证（verify_click）：点击前后截图对比，确认界面变化。
+///
+/// 返回 (验证通过, 差异像素数, 差异比例)。截图失败时返回 Err。
+/// 差异比例 > `min_diff_ratio` 视为界面变化（点击生效）。
+pub fn verify_click(
+    before: &str,
+    after: &str,
+    min_diff_ratio: f64,
+) -> Result<(bool, u64, f64), String> {
+    use crate::image::load_rgb;
+    let b = load_rgb(std::path::Path::new(before)).map_err(|e| format!("load before: {e}"))?;
+    let a = load_rgb(std::path::Path::new(after)).map_err(|e| format!("load after: {e}"))?;
+    if b.data.len() != a.data.len() {
+        return Err(format!("尺寸不一致: {} vs {}", b.data.len(), a.data.len()));
+    }
+    let mut diff: u64 = 0;
+    for (pb, pa) in b.data.iter().zip(a.data.iter()) {
+        if pb != pa {
+            diff += 1;
+        }
+    }
+    let ratio = diff as f64 / b.data.len() as f64;
+    Ok((ratio > min_diff_ratio, diff, ratio))
+}
+
+/// 点击 + 闭环验证：click → 截图对比 → 失败重试（≤2 次）。
+///
+/// 每次尝试：点击前截图 → 点击 → 点击后截图 → verify_click。
+/// 验证通过返回 Ok；全部失败返回 Err（含各次差异）。
+pub fn click_with_verify(
+    element_id: usize,
+    fallback_xy: Option<(f64, f64)>,
+    capture_path: &str,
+    min_diff_ratio: f64,
+    retries: usize,
+) -> Result<Value, String> {
+    let mut attempts: Vec<Value> = Vec::new();
+    for attempt in 0..=retries {
+        // 点击前截图
+        let before = format!("{capture_path}.before{attempt}.png");
+        crate::capture::run(&crate::capture::CaptureParams {
+            region: None,
+            out: before.clone(),
+        })
+        .map_err(|e| format!("capture before: {e}"))?;
+        // 执行点击（五级降级链）
+        let r = click_element(element_id, fallback_xy)?;
+        // 点击后截图
+        let after = format!("{capture_path}.after{attempt}.png");
+        crate::capture::run(&crate::capture::CaptureParams {
+            region: None,
+            out: after.clone(),
+        })
+        .map_err(|e| format!("capture after: {e}"))?;
+        // 对比
+        let (ok, diff, ratio) = verify_click(&before, &after, min_diff_ratio)?;
+        attempts.push(json!({
+            "attempt": attempt,
+            "method": r.get("method").cloned().unwrap_or(json!("unknown")),
+            "diff_pixels": diff,
+            "diff_ratio": ratio,
+            "verified": ok,
+        }));
+        if ok {
+            let mut out = r.clone();
+            out["verify"] =
+                json!({"ok": true, "attempt": attempt, "diff_pixels": diff, "diff_ratio": ratio});
+            out["attempts"] = json!(attempts);
+            return Ok(out);
+        }
+        // 失败：短暂等待后重试（界面可能未稳定）
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    Err(format!(
+        "click_with_verify 全部失败（{} 次尝试）: {}",
+        retries + 1,
+        serde_json::to_string(&attempts).unwrap_or_default()
+    ))
+}
+
 /// 第 1 级：AT-SPI DoAction（元素编号 → 无障碍动作直达）。
 ///
 /// 通过 a11y 树找到编号元素 → 查询可用动作 → DoAction(0)（默认动作 = click）。
@@ -610,6 +690,30 @@ pub fn run(p: &GuiParams) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verify_click_detects_diff() {
+        // 构造两张 2×2 图：一张全白，一张有 1 像素黑（不同路径）
+        let mk = |path: &str, px: [u8; 12]| {
+            let img = image::RgbImage::from_raw(2, 2, px.to_vec()).unwrap();
+            img.save(path).unwrap();
+        };
+        let before = "/tmp/vsd_verify_before.png";
+        let after = "/tmp/vsd_verify_after.png";
+        mk(before, [255; 12]);
+        mk(
+            after,
+            [255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 255, 255],
+        );
+        let (ok, diff, ratio) = verify_click(before, after, 0.001).unwrap();
+        assert!(ok, "1 像素差异应触发验证通过");
+        assert_eq!(diff, 3); // 1 像素 = 3 通道
+        assert!(ratio > 0.0);
+        // 相同图 → 不通过
+        let (ok2, diff2, _) = verify_click(before, before, 0.001).unwrap();
+        assert!(!ok2);
+        assert_eq!(diff2, 0);
+    }
 
     #[test]
     fn status_reports_layout() {
