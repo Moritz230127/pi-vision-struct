@@ -160,24 +160,50 @@ pub fn run(p: &A11yParams) -> Result<Value, String> {
                         Ok(o) => o,
                         Err(_) => return Ok(()),
                     };
-                let ext = match get_extents_zbus(&obj_ref, conn.connection()).await {
-                    Ok(e) => e,
-                    Err(_) => return Ok(()),
-                };
-                let (x, y, w, h) = ext;
-                let (x2, y2) = (x + w.max(0), y + h.max(0));
-                let visible = w > 0 && h > 0;
-                let el = json!({
-                    "id": *next_id,
-                    "type": role_name,
-                    "bbox": [x, y, x2, y2],
-                    "text": if name.is_empty() { Value::Null } else { Value::String(name.chars().take(120).collect()) },
-                    "coordsys": "screen_px",
-                });
-                elements.push(el);
-                *next_id += 1;
-                if !visible {
-                    return Ok(());
+                // 应用节点（role=application）无 Component 接口 → 不输出元素，
+                // 但继续遍历子节点（窗口/按钮/输入框才有 extents）
+                let is_app = role_name == "application";
+                if !is_app {
+                    let ext = match get_extents_zbus(&obj_ref, conn.connection()).await {
+                        Ok(e) => e,
+                        // 无 Component 接口（部分节点）→ 跳过该节点但继续遍历子节点
+                        Err(_) => {
+                            let n = acc.child_count().await.unwrap_or(0);
+                            for i in 0..n {
+                                let child_ref = match acc.get_child_at_index(i).await {
+                                    Ok(c) => c,
+                                    Err(_) => continue,
+                                };
+                                let child = match child_ref
+                                    .into_accessible_proxy(conn.connection())
+                                    .await
+                                {
+                                    Ok(c) => c,
+                                    Err(_) => continue,
+                                };
+                                walk(
+                                    &child, conn, depth + 1, p, elements, truncated, next_id,
+                                )
+                                .await?;
+                            }
+                            return Ok(());
+                        }
+                    };
+                    let (x, y, w, h) = ext;
+                    let (x2, y2) = (x + w.max(0), y + h.max(0));
+                    let visible = w > 0 && h > 0;
+                    let el = json!({
+                        "id": *next_id,
+                        "type": role_name,
+                        "bbox": [x, y, x2, y2],
+                        "text": if name.is_empty() { Value::Null } else { Value::String(name.chars().take(120).collect()) },
+                        "coordsys": "screen_px",
+                    });
+                    elements.push(el);
+                    *next_id += 1;
+                    if !visible {
+                        return Ok(());
+                    }
                 }
                 let n = acc.child_count().await.unwrap_or(0);
                 for i in 0..n {
