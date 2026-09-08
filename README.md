@@ -80,6 +80,12 @@ rapidocr 3 个 ONNX（OCR 必需）。其余模型需 PyTorch 导出或 HuggingF
 > - 二进制 151MB 不打包进 npm（包保持轻量 248KB），postinstall 从 GitHub Release 下载
 > - npm 11 的 install-scripts 安全策略可能阻止 postinstall 自动执行：
 >   `npm install-scripts approve pi-version-and-gui` 或手动 `node scripts/install.js`
+> - **approve 必须在包安装目录运行**（pi 的 npm 根）：
+>   ```bash
+>   cd ~/.pi/agent/npm   # pi 的 npm 安装根
+>   npm install-scripts approve pi-version-and-gui
+>   ```
+>   在 `~` 运行会报 `ENOMATCH`（找不到包）
 > - 模型 4.1GB 不打包进 npm（太大），存 `~/.cache/vsensor/`（独立于工作区）
 
 ---
