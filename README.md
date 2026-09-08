@@ -56,19 +56,31 @@ cargo build --release
 
 ### 2.3 模型
 
-模型按需下载到 `~/.cache/vsensor/`（~4GB）：
+模型存 `~/.cache/vsensor/`（~4GB，**独立于工作区**，npm 扩展直接读）：
 
-| 模型 | 用途 | 大小 |
-| --- | --- | --- |
-| u2net.onnx | saliency 显著性 | ~170MB |
-| midas_v21_small_256.onnx | depth 深度 | ~100MB |
-| mobile_sam_encoder/decoder.onnx | segment 分割 | ~80MB |
-| rapidocr/ | OCR（det/rec/cls） | ~30MB |
-| oclv2/ | detect 检测 | ~1.2GB |
-| florence2/ | omniparser 图标标注 | ~1.5GB |
-| icon_detect.onnx | omniparser 图标检测 | ~40MB |
-| doclayout.onnx | layout 版式 | ~100MB |
-| clip_vitb32.onnx | cluster 聚类 | ~350MB |
+| 模型 | 用途 | 大小 | 下载方式 |
+| --- | --- | --- | --- |
+| u2net.onnx | saliency 显著性 | ~170MB | PyTorch 导出 |
+| midas_v21_small_256.onnx | depth 深度 | ~100MB | PyTorch 导出 |
+| mobile_sam_encoder/decoder.onnx | segment 分割 | ~80MB | PyTorch 导出 |
+| rapidocr/ | OCR（det/rec/cls） | ~30MB | **install.js 自动下载**（modelscope） |
+| oclv2/ | detect 检测 | ~1.2GB | HuggingFace（需认证） |
+| florence2/ | omniparser 图标标注 | ~1.5GB | HuggingFace（需认证） |
+| icon_detect.onnx | omniparser 图标检测 | ~40MB | HuggingFace（需认证） |
+| doclayout.onnx | layout 版式 | ~100MB | PyTorch 导出 |
+| clip_vitb32.onnx | cluster 聚类 | ~350MB | PyTorch 导出 |
+
+**自动下载**：`pi install npm:pi-version-and-gui` 的 postinstall 自动下载
+rapidocr 3 个 ONNX（OCR 必需）。其余模型需 PyTorch 导出或 HuggingFace 下载
+（见 `python/export_*.py` 导出脚本）。
+
+**检查缺失**：`vs check` 列出缺失模型清单。
+
+> ⚠️ **二进制问题说明**：
+> - 二进制 151MB 不打包进 npm（包保持轻量 248KB），postinstall 从 GitHub Release 下载
+> - npm 11 的 install-scripts 安全策略可能阻止 postinstall 自动执行：
+>   `npm install-scripts approve pi-version-and-gui` 或手动 `node scripts/install.js`
+> - 模型 4.1GB 不打包进 npm（太大），存 `~/.cache/vsensor/`（独立于工作区）
 
 ---
 
