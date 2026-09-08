@@ -303,11 +303,16 @@ fn focus_window(window: &str) -> Result<(), String> {
 ///
 /// `element_id`：融合元素编号（analyze 输出的 [N]）。
 /// `fallback_xy`：无编号时的坐标兜底（vision_click/global 用）。
-pub fn click_element(element_id: usize, fallback_xy: Option<(f64, f64)>) -> Result<Value, String> {
+pub fn click_element(
+    element_id: usize,
+    fallback_xy: Option<(f64, f64)>,
+    bus: Option<&str>,
+    path: Option<&str>,
+) -> Result<Value, String> {
     let mut chain: Vec<String> = Vec::new();
 
-    // 1) a11y_action：AT-SPI DoAction（零坐标误差）
-    match a11y_action_click(element_id) {
+    // 1) a11y_action：AT-SPI DoAction（零坐标误差）——用 bus/path 直接定位
+    match a11y_action_click(element_id, bus, path) {
         Ok(true) => {
             chain.push("a11y_action".into());
             return Ok(json!({"ok": true, "method": "a11y_action", "chain": chain}));
@@ -317,7 +322,7 @@ pub fn click_element(element_id: usize, fallback_xy: Option<(f64, f64)>) -> Resu
     }
 
     // 2) element_click：编号 → GetExtents 屏幕坐标 → 绝对定位
-    match a11y_extents_click(element_id) {
+    match a11y_extents_click(element_id, bus, path) {
         Ok(()) => {
             chain.push("element_click".into());
             return Ok(json!({"ok": true, "method": "element_click", "chain": chain}));
@@ -383,7 +388,7 @@ pub fn click_with_verify(
         })
         .map_err(|e| format!("capture before: {e}"))?;
         // 执行点击（五级降级链）
-        let r = click_element(element_id, fallback_xy)?;
+        let r = click_element(element_id, fallback_xy, None, None)?;
         // 点击后截图
         let after = format!("{capture_path}.after{attempt}.png");
         crate::capture::run(&crate::capture::CaptureParams {
@@ -417,173 +422,51 @@ pub fn click_with_verify(
     ))
 }
 
-/// 第 1 级：AT-SPI DoAction（元素编号 → 无障碍动作直达）。
+/// 第 1 级：AT-SPI DoAction（bus/path 直接定位 → 无障碍动作直达）。
 ///
-/// 通过 a11y 树找到编号元素 → 查询可用动作 → DoAction(0)（默认动作 = click）。
-fn a11y_action_click(element_id: usize) -> Result<bool, String> {
-    use atspi::connection::AccessibilityConnection;
-    use atspi::proxy::accessible::{AccessibleProxy, ObjectRefExt};
-
+/// F3 修复：不再遍历全局树（编号空间不匹配），直接用 analyze 返回的
+/// bus name + path 建 zbus proxy 调 DoAction(0)（默认动作 = click）。
+fn a11y_action_click(
+    _element_id: usize,
+    bus: Option<&str>,
+    path: Option<&str>,
+) -> Result<bool, String> {
+    let (Some(bus), Some(path)) = (bus, path) else {
+        return Err("元素无 bus/path（非 a11y 来源）".into());
+    };
     let rt = tokio::runtime::Runtime::new().map_err(|e| format!("tokio rt: {e}"))?;
     rt.block_on(async {
-        let conn = AccessibilityConnection::new()
+        let conn = atspi::connection::AccessibilityConnection::new()
             .await
             .map_err(|e| format!("atspi connect: {e}"))?;
-        let root = conn
-            .root_accessible_on_registry()
-            .await
-            .map_err(|e| format!("atspi root: {e}"))?;
-
-        // 遍历找第 element_id 个元素（与 a11y::run 同构）
-        let mut count: usize = 0;
-        let mut found: Option<atspi::proxy::common::object_ref::ObjectRefOwned> = None;
-
-        fn walk<'a>(
-            acc: &'a AccessibleProxy<'_>,
-            conn: &'a AccessibilityConnection,
-            target: usize,
-            count: &'a mut usize,
-            found: &'a mut Option<atspi::proxy::common::object_ref::ObjectRefOwned>,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>>
-        {
-            Box::pin(async move {
-                if found.is_some() {
-                    return Ok(());
-                }
-                let obj_ref: atspi::proxy::common::object_ref::ObjectRefOwned = match acc.try_into()
-                {
-                    Ok(o) => o,
-                    Err(_) => return Ok(()),
-                };
-                if *count == target {
-                    *found = Some(obj_ref);
-                    return Ok(());
-                }
-                *count += 1;
-                let n = acc.child_count().await.unwrap_or(0);
-                for i in 0..n {
-                    let child_ref = match acc.get_child_at_index(i).await {
-                        Ok(c) => c,
-                        Err(_) => continue,
-                    };
-                    let child = match child_ref.into_accessible_proxy(conn.connection()).await {
-                        Ok(c) => c,
-                        Err(_) => continue,
-                    };
-                    walk(&child, conn, target, count, found).await?;
-                }
-                Ok(())
-            })
-        }
-
-        let app_count = root.child_count().await.unwrap_or(0);
-        for i in 0..app_count {
-            let app_ref = match root.get_child_at_index(i).await {
-                Ok(a) => a,
-                Err(_) => continue,
-            };
-            let app = match app_ref.into_accessible_proxy(conn.connection()).await {
-                Ok(a) => a,
-                Err(_) => continue,
-            };
-            walk(&app, &conn, element_id, &mut count, &mut found).await?;
-            if found.is_some() {
-                break;
-            }
-        }
-
-        let Some(obj_ref) = found else {
-            return Err(format!("a11y 树中无元素 {element_id}"));
-        };
         // 查询可用动作
-        let actions = crate::a11y::get_actions_zbus(&obj_ref, conn.connection()).await?;
+        let actions = crate::a11y::get_actions_zbus_path(bus, path, conn.connection()).await?;
         if actions.is_empty() {
             return Ok(false); // 无动作 → 降级
         }
         // 执行默认动作（index 0 = click）
-        crate::a11y::do_action_zbus(&obj_ref, conn.connection(), 0).await
+        crate::a11y::do_action_zbus_path(bus, path, conn.connection(), 0).await
     })
 }
 
-/// 第 2 级：element_click（编号 → GetExtents 屏幕坐标 → 绝对定位）。
-fn a11y_extents_click(element_id: usize) -> Result<(), String> {
-    use atspi::connection::AccessibilityConnection;
-    use atspi::proxy::accessible::{AccessibleProxy, ObjectRefExt};
-
+/// 第 2 级：element_click（bus/path → GetExtents 屏幕坐标 → 绝对定位）。
+fn a11y_extents_click(
+    _element_id: usize,
+    bus: Option<&str>,
+    path: Option<&str>,
+) -> Result<(), String> {
+    let (Some(bus), Some(path)) = (bus, path) else {
+        return Err("元素无 bus/path（非 a11y 来源）".into());
+    };
     let rt = tokio::runtime::Runtime::new().map_err(|e| format!("tokio rt: {e}"))?;
     rt.block_on(async {
-        let conn = AccessibilityConnection::new()
+        let conn = atspi::connection::AccessibilityConnection::new()
             .await
             .map_err(|e| format!("atspi connect: {e}"))?;
-        let root = conn
-            .root_accessible_on_registry()
-            .await
-            .map_err(|e| format!("atspi root: {e}"))?;
-
-        let mut count: usize = 0;
-        let mut found: Option<atspi::proxy::common::object_ref::ObjectRefOwned> = None;
-
-        fn walk<'a>(
-            acc: &'a AccessibleProxy<'_>,
-            conn: &'a AccessibilityConnection,
-            target: usize,
-            count: &'a mut usize,
-            found: &'a mut Option<atspi::proxy::common::object_ref::ObjectRefOwned>,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>>
-        {
-            Box::pin(async move {
-                if found.is_some() {
-                    return Ok(());
-                }
-                let obj_ref: atspi::proxy::common::object_ref::ObjectRefOwned = match acc.try_into()
-                {
-                    Ok(o) => o,
-                    Err(_) => return Ok(()),
-                };
-                if *count == target {
-                    *found = Some(obj_ref);
-                    return Ok(());
-                }
-                *count += 1;
-                let n = acc.child_count().await.unwrap_or(0);
-                for i in 0..n {
-                    let child_ref = match acc.get_child_at_index(i).await {
-                        Ok(c) => c,
-                        Err(_) => continue,
-                    };
-                    let child = match child_ref.into_accessible_proxy(conn.connection()).await {
-                        Ok(c) => c,
-                        Err(_) => continue,
-                    };
-                    walk(&child, conn, target, count, found).await?;
-                }
-                Ok(())
-            })
-        }
-
-        let app_count = root.child_count().await.unwrap_or(0);
-        for i in 0..app_count {
-            let app_ref = match root.get_child_at_index(i).await {
-                Ok(a) => a,
-                Err(_) => continue,
-            };
-            let app = match app_ref.into_accessible_proxy(conn.connection()).await {
-                Ok(a) => a,
-                Err(_) => continue,
-            };
-            walk(&app, &conn, element_id, &mut count, &mut found).await?;
-            if found.is_some() {
-                break;
-            }
-        }
-
-        let Some(obj_ref) = found else {
-            return Err(format!("a11y 树中无元素 {element_id}"));
-        };
         // GetExtents 屏幕坐标 → 绝对定位点击
-        let (x, y, w, h) = crate::a11y::get_extents_zbus(&obj_ref, conn.connection()).await?;
+        let (x, y, w, h) = crate::a11y::get_extents_zbus_path(bus, path, conn.connection()).await?;
         if w <= 0 || h <= 0 {
-            return Err(format!("元素 {element_id} 不可见（{w}×{h}）"));
+            return Err(format!("元素不可见（{w}×{h}）"));
         }
         let (cx, cy) = (x as f64 + w as f64 / 2.0, y as f64 + h as f64 / 2.0);
         pointer_move(cx, cy)?;
@@ -625,7 +508,7 @@ pub fn run(p: &GuiParams) -> Result<Value, String> {
                 (Some(x), Some(y)) => Some((x, y)),
                 _ => None,
             };
-            let r = click_element(id, fallback)?;
+            let r = click_element(id, fallback, None, None)?;
             // 闭环验证（verify_click）
             if p.verify {
                 // 点击后截图对比（简化：返回提示，真实对比在 G3 端到端）
@@ -803,7 +686,7 @@ mod tests {
     fn click_element_chain_reports_method() {
         // 五级降级链：无 Wayland/a11y 环境时返回 Err（含链信息）或成功
         // 合成验证：click_element 的链构建逻辑（a11y 不可用 → 降级）
-        let r = click_element(9999, Some((100.0, 100.0)));
+        let r = click_element(9999, Some((100.0, 100.0)), None, None);
         match r {
             Ok(v) => {
                 // 环境可用：a11y 或 vision_click 成功

@@ -84,7 +84,7 @@ fn analyze_a11y_only(image: &str, a11y_report: Value) -> Result<Value, String> {
         e["conf"] = json!(1.0);
         e["sources"] = json!(["a11y"]);
         e["assertion"] = json!("此元素由 AT-SPI 无障碍树确认（结构级，conf 1.0）");
-        // 精简字段（token 治理）
+        // 精简字段（token 治理）——保留 bus/path（F3：click 直接定位）
         let keep = [
             "id",
             "bbox",
@@ -94,6 +94,8 @@ fn analyze_a11y_only(image: &str, a11y_report: Value) -> Result<Value, String> {
             "conf",
             "sources",
             "assertion",
+            "bus",
+            "path",
         ];
         if let Some(obj) = e.as_object_mut() {
             obj.retain(|k, _| keep.contains(&k.as_str()));
@@ -948,7 +950,24 @@ pub fn run(p: &ProtocolParams) -> Result<Value, String> {
                 };
                 (x / sx, y / sy)
             });
-            let r = crate::gui::click_element(id, fallback)?;
+            // 从 analyze 结果取 bus/path（F3：click 直接定位，不再遍历全局树）
+            let (bus, path) = base
+                .get("elements")
+                .and_then(|e| e.as_array())
+                .and_then(|els| els.get(id))
+                .map(|e| {
+                    (
+                        e.get("bus").and_then(|b| b.as_str()).map(String::from),
+                        e.get("path").and_then(|p| p.as_str()).map(String::from),
+                    )
+                })
+                .unwrap_or((None, None));
+            let r = crate::gui::click_element(
+                id,
+                fallback,
+                bus.as_deref(),
+                path.as_deref(),
+            )?;
             // 闭环：返回元素信息 + 点击结果
             let mut out = r.clone();
             out["element_id"] = json!(id);

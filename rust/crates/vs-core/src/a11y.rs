@@ -198,6 +198,9 @@ pub fn run(p: &A11yParams) -> Result<Value, String> {
                         "bbox": [x, y, x2, y2],
                         "text": if name.is_empty() { Value::Null } else { Value::String(name.chars().take(120).collect()) },
                         "coordsys": "screen_px",
+                        // F3：bus name + path，供 click 路径直接定位（不再重新遍历全局树）
+                        "bus": obj_ref.name().map(|n| n.to_string()),
+                        "path": obj_ref.path().to_string(),
                     });
                     elements.push(el);
                     *next_id += 1;
@@ -267,4 +270,87 @@ mod tests {
         assert!(p.app.is_none());
         assert_eq!(p.max_items, 80);
     }
+}
+
+// ---- F3：bus/path 直接定位（click 路径用，替代全局树遍历）----
+
+/// 通过 bus name + path 直接调用 GetExtents（F3：click 路径直接定位）。
+pub async fn get_extents_zbus_path(
+    bus: &str,
+    path: &str,
+    conn: &zbus::Connection,
+) -> Result<(i32, i32, i32, i32), String> {
+    let proxy = zbus::Proxy::new(conn, bus, path, "org.a11y.atspi.Component")
+        .await
+        .map_err(|e| format!("zbus proxy: {e}"))?;
+    let mut last_err = String::new();
+    for _ in 0..3 {
+        match proxy.call_method("GetExtents", &0u32).await {
+            Ok(reply) => {
+                return reply
+                    .body()
+                    .deserialize::<(i32, i32, i32, i32)>()
+                    .map_err(|e| format!("deserialize: {e}"));
+            }
+            Err(e) => {
+                last_err = format!("GetExtents: {e}");
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
+    }
+    Err(last_err)
+}
+
+/// 通过 bus name + path 直接调用 GetActions（F3）。
+pub async fn get_actions_zbus_path(
+    bus: &str,
+    path: &str,
+    conn: &zbus::Connection,
+) -> Result<Vec<String>, String> {
+    use atspi::proxy::action::ActionProxy;
+    let name: zbus::names::BusName = bus
+        .try_into()
+        .map_err(|e: zbus::names::Error| format!("bus name 解析: {e}"))?;
+    let proxy = ActionProxy::builder(conn)
+        .destination(name)
+        .map_err(|e| format!("ActionProxy destination: {e}"))?
+        .path(path)
+        .map_err(|e| format!("ActionProxy path: {e}"))?
+        .cache_properties(zbus::proxy::CacheProperties::No)
+        .build()
+        .await
+        .map_err(|e| format!("ActionProxy build: {e}"))?;
+    let actions = proxy
+        .get_actions()
+        .await
+        .map_err(|e| format!("GetActions: {e}"))?;
+    Ok(actions.into_iter().map(|a| a.name).collect())
+}
+
+/// 通过 bus name + path 直接调用 DoAction（F3）。
+pub async fn do_action_zbus_path(
+    bus: &str,
+    path: &str,
+    conn: &zbus::Connection,
+    action_index: i32,
+) -> Result<bool, String> {
+    let proxy = zbus::Proxy::new(conn, bus, path, "org.a11y.atspi.Action")
+        .await
+        .map_err(|e| format!("zbus Action proxy: {e}"))?;
+    let mut last_err = String::new();
+    for _ in 0..3 {
+        match proxy.call_method("DoAction", &action_index).await {
+            Ok(reply) => {
+                return reply
+                    .body()
+                    .deserialize::<bool>()
+                    .map_err(|e| format!("deserialize DoAction: {e}"));
+            }
+            Err(e) => {
+                last_err = format!("DoAction: {e}");
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
+    }
+    Err(last_err)
 }
