@@ -22,6 +22,8 @@ DeepSeek-V4.1 已原生支持多模态输入，该前提不再成立，本项目
 - 全部代码、文档、提交历史与 **MIT 许可**保留，可自由使用、fork、二次开发。
 - GitHub Release 中的预编译二进制 `vs-bin` / `vsd` / `vs-mcp`（v4.0.0）**仍可下载**，
   已有的 npm 安装（postinstall 从 Release 拉取二进制）**不会中断**。
+  直链：<https://github.com/Moritz230127/pi-vision-struct/releases/tag/v4.0.0>
+  （`scripts/install.js` 中的下载地址硬编码指向 v4.0.0，不依赖 Latest 标记，故不受影响。）
 - 模型缓存 `~/.cache/vsensor/` 与本地数据不受影响。
 
 ### 不再提供
@@ -67,6 +69,9 @@ that upstream has since built in, it is sealed here.
 - Prebuilt binaries `vs-bin` / `vsd` / `vs-mcp` in the v4.0.0 Release **remain
   downloadable**, so existing npm installs (postinstall fetches them from
   Releases) **keep working**.
+  Direct link: <https://github.com/Moritz230127/pi-vision-struct/releases/tag/v4.0.0>
+  (The download URLs in `scripts/install.js` are hardcoded to v4.0.0 and do not
+  depend on the "Latest" badge, so they are unaffected.)
 - The model cache at `~/.cache/vsensor/` and local data are unaffected.
 
 ### No longer provided
