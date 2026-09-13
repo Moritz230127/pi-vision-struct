@@ -1,3 +1,36 @@
+> ## ⛔ 本项目已停止维护 / This project is no longer maintained
+>
+> **状态：2026-09-13 正式封库（End of Life）。** 仓库已归档为**只读**，不再接受
+> issue、PR，不再有任何维护与更新。
+>
+> **原因**：本项目的前提是「纯文本模型需要外部视觉通道」。DeepSeek-V4.1 已原生支持
+> 多模态输入，该前提不再成立，本项目随之失去意义。
+>
+> **仍然可用**：代码、文档、完整提交历史与 MIT 许可全部保留，可自由使用、fork、
+> 二次开发；GitHub Release 中的预编译二进制（`vs-bin` / `vsd` / `vs-mcp`）仍可下载，
+> 已有的 npm 安装（postinstall 从 Release 拉二进制）不会中断。
+> npm 包 `pi-version-and-gui` 已标记 deprecated，安装时会显示弃用警告。
+>
+> **请注意**：不再有任何安全修复或兼容性更新。涉及 AT-SPI / Wayland / niri 的
+> 环境变更可能导致工具失效，请自行评估后使用。
+>
+> ---
+>
+> **Status: archived and End-of-Life as of 2026-09-13.** The repository is read-only;
+> issues, pull requests, updates and maintenance have all stopped.
+>
+> **Why**: this project was built on the premise that text-only models need an external
+> vision channel. DeepSeek-V4.1 handles multimodal input natively, so that premise no
+> longer holds and the project has lost its purpose.
+>
+> **What still works**: the source, docs, full commit history and MIT license remain
+> available for use, forking and further development. Prebuilt binaries in GitHub
+> Releases stay downloadable, so existing npm installs keep functioning. The npm
+> package `pi-version-and-gui` is marked deprecated.
+>
+> **Please note**: no security or compatibility fixes will be issued. Environment
+> changes around AT-SPI / Wayland / niri may break the tooling — evaluate accordingly.
+
 # pi-version-and-gui
 
 **给纯文本模型的数理化视觉通道 + GUI 控制** —— 全部输出为精确数值（坐标 / hex / 矩阵 / 统计），零主观描述。
@@ -48,8 +81,8 @@ pi install npm:pi-version-and-gui
 ### 2.2 从源码构建
 
 ```bash
-git clone git@github.com:Moritz230127/pi-version-and-gui.git
-cd pi-version-and-gui/rust
+git clone git@github.com:Moritz230127/pi-vision-struct.git
+cd pi-vision-struct/rust
 cargo build --release
 # 二进制: target/release/vs-bin / vsd / vs-mcp
 ```
